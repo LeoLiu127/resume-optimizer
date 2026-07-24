@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>简历模板样例对比</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --page: #f5f5f5;
+    --paper: #ffffff;
+    --ink-1: #111827;
+    --ink-2: #374151;
+    --ink-3: #6b7280;
+    --rule: #e5e7eb;
+    --serif: "Source Han Serif SC", "Noto Serif SC", "Songti SC", serif;
+    --sans: "PingFang SC", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
+  }
+  body {
+    background: var(--page);
+    font-family: var(--sans);
+    color: var(--ink-2);
+    padding: 24px;
+    line-height: 1.55;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; }
+  h1.legend {
+    font-size: 18px;
+    color: var(--ink-1);
+    margin-bottom: 6px;
+    letter-spacing: -0.01em;
+  }
+  p.legend-sub {
+    font-size: 13px;
+    color: var(--ink-3);
+    margin-bottom: 22px;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 18px;
+    align-items: start;
+  }
+  .col-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: 10px;
+    padding: 0 2px;
+  }
+  .col-head .name { font-size: 15px; font-weight: 700; color: var(--ink-1); }
+  .col-head .tag {
+    font-size: 11px;
+    color: var(--ink-3);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+  .paper {
+    background: var(--paper);
+    border: 1px solid var(--rule);
+    border-radius: 6px;
+    overflow: hidden;
+    aspect-ratio: 210 / 297;
+    width: 100%;
+    padding: 18px 18px;
+    display: flex;
+    flex-direction: column;
+  }
+  /* === Template 1 Classic === */
+  .t1 .name {
+    font-family: var(--serif);
+    font-size: 18px;
+    color: var(--ink-1);
+    text-align: center;
+    margin-bottom: 2px;
+    letter-spacing: 0.04em;
+  }
+  .t1 .title {
+    text-align: center;
+    font-size: 10px;
+    color: var(--ink-3);
+    margin-bottom: 12px;
+    letter-spacing: 0.08em;
+  }
+  .t1 .rule { border: 0; border-top: 2px solid var(--ink-1); margin: 0 0 10px; }
+  .t1 h3 {
+    font-family: var(--serif);
+    font-size: 11px;
+    color: var(--ink-1);
+    border-bottom: 1px solid var(--rule);
+    padding-bottom: 3px;
+    margin: 8px 0 6px;
+    letter-spacing: 0.04em;
+  }
+  .t1 .exp { margin-bottom: 6px; }
+  .t1 .exp-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    font-size: 10px;
+  }
+  .t1 .exp-head .l { color: var(--ink-1); font-weight: 600; }
+  .t1 .exp-head .r { color: var(--ink-3); }
+  .t1 ul { list-style: none; padding-left: 0; margin: 3px 0 0; }
+  .t1 li {
+    font-size: 9px;
+    color: var(--ink-2);
+    line-height: 1.5;
+    padding-left: 8px;
+    position: relative;
+    margin-bottom: 2px;
+  }
+  .t1 li::before {
+    content: "•";
+    position: absolute;
+    left: 0;
+    color: var(--ink-3);
+  }
+  /* === Template 2 Modern === */
+  .t2 { padding: 0; flex-direction: row; }
+  .t2 .left {
+    width: 33%;
+    background: var(--ink-1);
+    color: #f3f4f6;
+    padding: 18px 14px;
+    display: flex;
+    flex-direction: column;
+  }
+  .t2 .right { flex: 1; padding: 18px 16px; background: #ffffff; }
+  .t2 .lname {
+    font-size: 16px;
+    font-weight: 700;
+    color: #ffffff;
+    margin-bottom: 4px;
+    letter-spacing: -0.01em;
+  }
+  .t2 .ltitle { font-size: 10px; color: #9ca3af; margin-bottom: 14px; }
+  .t2 .lh {
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: #93c5fd;
+    margin: 10px 0 5px;
+    font-weight: 600;
+  }
+  .t2 .litem {
+    font-size: 9px;
+    color: #e5e7eb;
+    line-height: 1.5;
+    margin-bottom: 3px;
+  }
+  .t2 .chips { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 4px; }
+  .t2 .chip {
+    font-size: 8.5px;
+    background: #1f2937;
+    color: #e5e7eb;
+    border-radius: 3px;
+    padding: 2px 5px;
+  }
+  .t2 .bar {
+    height: 3px;
+    background: var(--accent, #2563eb);
+    border-radius: 1px;
+    margin-bottom: 2px;
+  }
+  .t2 .rname {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--ink-1);
+    margin-bottom: 2px;
+  }
+  .t2 .rrole {
+    font-size: 10px;
+    color: var(--accent, #2563eb);
+    font-weight: 600;
+    margin-bottom: 10px;
+  }
+  .t2 h3 {
+    font-size: 10px;
+    color: var(--ink-1);
+    margin: 8px 0 4px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    border-left: 2px solid var(--accent, #2563eb);
+    padding-left: 6px;
+  }
+  .t2 .exp {
+    margin-bottom: 6px;
+    padding-bottom: 4px;
+    border-bottom: 1px dashed var(--rule);
+  }
+  .t2 .exp-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    font-size: 10px;
+  }
+  .t2 .exp-head .l { color: var(--ink-1); font-weight: 600; }
+  .t2 .exp-head .r { color: var(--ink-3); font-size: 9px; }
+  .t2 ul { list-style: none; padding-left: 0; margin: 3px 0 0; }
+  .t2 li {
+    font-size: 9px;
+    color: var(--ink-2);
+    line-height: 1.45;
+    padding-left: 8px;
+    position: relative;
+    margin-bottom: 2px;
+  }
+  .t2 li::before {
+    content: "▸";
+    position: absolute;
+    left: 0;
+    color: var(--accent, #2563eb);
+  }
+  /* === Template 3 Minimal === */
+  .t3 { padding: 26px 22px; justify-content: flex-start; }
+  .t3 .name {
+    font-size: 22px;
+    font-weight: 300;
+    color: var(--ink-1);
+    letter-spacing: -0.01em;
+    margin-bottom: 0;
+  }
+  .t3 .meta {
+    font-size: 10px;
+    color: var(--ink-3);
+    margin-top: 4px;
+    margin-bottom: 16px;
+    letter-spacing: 0.02em;
+  }
+  .t3 .intro {
+    font-size: 10.5px;
+    line-height: 1.7;
+    color: var(--ink-2);
+    margin: 10px 0 14px;
+    font-weight: 300;
+  }
+  .t3 h3 {
+    font-size: 9px;
+    color: var(--ink-3);
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    margin: 12px 0 6px;
+    font-weight: 600;
+  }
+  .t3 .exp { margin-bottom: 8px; }
+  .t3 .exp-head .l {
+    font-size: 10.5px;
+    color: var(--ink-1);
+    font-weight: 500;
+  }
+  .t3 .exp-head .sub {
+    font-size: 9.5px;
+    color: var(--ink-3);
+    margin-top: 1px;
+  }
+  .t3 .exp-head .period {
+    font-size: 9px;
+    color: var(--ink-3);
+    margin-top: 2px;
+  }
+  .t3 ul { list-style: none; padding-left: 0; margin: 4px 0 0; }
+  .t3 li {
+    font-size: 9.5px;
+    color: var(--ink-2);
+    line-height: 1.6;
+    padding-left: 10px;
+    position: relative;
+    margin-bottom: 3px;
+    font-weight: 300;
+  }
+  .t3 li::before {
+    content: "—";
+    position: absolute;
+    left: 0;
+    color: var(--ink-3);
+  }
+  .caption {
+    margin-top: 10px;
+    padding: 0 2px;
+    font-size: 11.5px;
+    color: var(--ink-2);
+    line-height: 1.5;
+  }
+  .caption b { color: var(--ink-1); }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <h1 class="legend">简历模板样例对比</h1>
+    <p class="legend-sub">以下三款模板使用同一份「AI 产品经理」样例简历，仅样式不同。导出时按所选模板填充真实内容。</p>
+
+    <div class="grid">
+      <!-- Template 1 Classic -->
+      <div>
+        <div class="col-head"><span class="name">1. Classic</span><span class="tag">经典单栏</span></div>
+        <div class="paper t1">
+          <div class="name">陈思远</div>
+          <div class="title">AI PRODUCT MANAGER</div>
+          <hr class="rule" />
+          <h3>求职意向</h3>
+          <p style="font-size:10px;color:var(--ink-2);margin-bottom:2px;">AI 产品经理 · 北京 · 全职</p>
+          <h3>职业摘要</h3>
+          <p style="font-size:9.5px;color:var(--ink-2);line-height:1.5;">6 年互联网产品经验，3 年 AI 产品实战，主导从 0 到 1 的 LLM 应用落地。擅长将模糊业务诉求抽象为可工程化方案，平衡用户体验与技术可行性。</p>
+          <h3>工作经历</h3>
+          <div class="exp">
+            <div class="exp-head"><span class="l">深蓝科技 · 高级 AI 产品经理</span><span class="r">2023.03 – 至今</span></div>
+            <ul>
+              <li>主导智能客服 Agent 从 0 到 1 设计，月承接 12 万次咨询，平均响应时长缩短 62%</li>
+              <li>联合算法团队搭建 RAG 评测体系，将幻觉率从 9.4% 降至 2.1%</li>
+            </ul>
+          </div>
+          <div class="exp">
+            <div class="exp-head"><span class="l">云象 SaaS · 产品经理</span><span class="r">2020.07 – 2023.02</span></div>
+            <ul>
+              <li>负责企业数据分析平台，主导 12 个核心模块上线，年度营收提升 38%</li>
+              <li>推动 NPS 从 31 提升至 58，流失率降低 17 个百分点</li>
+            </ul>
+          </div>
+          <h3>项目经历</h3>
+          <div class="exp">
+            <div class="exp-head"><span class="l">企业内部知识库助手</span><span class="r">2024</span></div>
+            <ul>
+              <li>设计多文档解析与权限隔离方案，覆盖 8 大业务线，日活峰值 4.2k</li>
+            </ul>
+          </div>
+          <h3>教育背景</h3>
+          <p style="font-size:9.5px;color:var(--ink-2);">浙江大学 · 信息管理与信息系统 · 本科 · 2016-2020</p>
+        </div>
+        <p class="caption"><b>气质：</b>稳重专业。Serif 标题 + 黑色实线，最通用的安全选择。</p>
+      </div>
+
+      <!-- Template 2 Modern -->
+      <div>
+        <div class="col-head"><span class="name">2. Modern</span><span class="tag">左侧栏双栏</span></div>
+        <div class="paper t2" style="--accent:#2563eb;">
+          <div class="left">
+            <div class="lname">陈思远</div>
+            <div class="ltitle">AI Product Manager</div>
+            <div class="lh">联系</div>
+            <div class="litem">📧  chensiyuan@email.com</div>
+            <div class="litem">📱  138-0000-0000</div>
+            <div class="litem">📍  北京</div>
+            <div class="litem">🔗  linkedin.com/in/csy</div>
+            <div class="lh">核心能力</div>
+            <div class="chips">
+              <span class="chip">LLM 应用</span><span class="chip">RAG</span>
+              <span class="chip">Prompt Eng.</span><span class="chip">Agent 设计</span>
+              <span class="chip">数据分析</span><span class="chip">需求抽象</span>
+            </div>
+            <div class="lh">语言</div>
+            <div class="litem" style="margin-bottom:1px;">英语 · 商务流利</div>
+            <div class="bar" style="width:75%;"></div>
+            <div class="litem" style="margin-top:3px;">日语 · N1</div>
+            <div class="bar" style="width:65%;"></div>
+            <div class="lh">教育</div>
+            <div class="litem" style="font-weight:600;color:#fff;">浙江大学</div>
+            <div class="litem">信息管理 · 本科</div>
+            <div class="litem" style="color:#9ca3af;">2016 – 2020</div>
+          </div>
+          <div class="right">
+            <div class="rname">陈思远</div>
+            <div class="rrole">AI 产品经理 · 6 年经验</div>
+            <h3>个人简介</h3>
+            <p style="font-size:9.5px;color:var(--ink-2);line-height:1.55;">6 年互联网产品经验，主导多个 LLM 应用从 0 到 1 落地。擅长业务抽象、跨团队推进与 AI 能力工程化。</p>
+            <h3>工作经历</h3>
+            <div class="exp">
+              <div class="exp-head"><span class="l">深蓝科技 · 高级 AI 产品经理</span><span class="r">2023.03 – 至今</span></div>
+              <ul>
+                <li>主导智能客服 Agent 全流程设计，月承接 12 万次咨询</li>
+                <li>搭建 RAG 评测体系，幻觉率 9.4% → 2.1%</li>
+                <li>协调 4 个团队（算法/工程/运营/客服）达成目标</li>
+              </ul>
+            </div>
+            <div class="exp">
+              <div class="exp-head"><span class="l">云象 SaaS · 产品经理</span><span class="r">2020.07 – 2023.02</span></div>
+              <ul>
+                <li>负责企业数据分析平台，主导 12 个核心模块上线</li>
+                <li>NPS 31 → 58，年度营收 +38%</li>
+              </ul>
+            </div>
+            <h3>关键项目</h3>
+            <div class="exp">
+              <div class="exp-head"><span class="l">企业内部知识库助手</span><span class="r">2024</span></div>
+              <ul>
+                <li>多文档解析 + 权限隔离，覆盖 8 大业务线</li>
+                <li>日活峰值 4.2k，被评为年度最佳内部工具</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+        <p class="caption"><b>气质：</b>现代信息密度高。深色左栏 + accent 蓝边，最适合互联网/ToB 岗位。</p>
+      </div>
+
+      <!-- Template 3 Minimal -->
+      <div>
+        <div class="col-head"><span class="name">3. Minimal</span><span class="tag">极简留白</span></div>
+        <div class="paper t3">
+          <div class="name">陈思远</div>
+          <div class="meta">AI 产品经理 · chensiyuan@email.com · 北京</div>
+          <p class="intro">6 年互联网产品，主导 LLM 应用从 0 到 1。擅长把模糊业务诉求抽象为可落地方案，平衡体验与技术。</p>
+          <h3>Experience</h3>
+          <div class="exp">
+            <div class="exp-head">
+              <div class="l">高级 AI 产品经理 · 深蓝科技</div>
+              <div class="period">2023 – 至今</div>
+            </div>
+            <ul>
+              <li>主导智能客服 Agent 设计，月承接 12 万次咨询，响应时长 -62%</li>
+              <li>搭建 RAG 评测体系，幻觉率 9.4% → 2.1%</li>
+            </ul>
+          </div>
+          <div class="exp">
+            <div class="exp-head">
+              <div class="l">产品经理 · 云象 SaaS</div>
+              <div class="period">2020 – 2023</div>
+            </div>
+            <ul>
+              <li>数据分析平台 12 个核心模块上线，年度营收 +38%</li>
+              <li>NPS 31 → 58，流失率 -17pp</li>
+            </ul>
+          </div>
+          <h3>Selected Project</h3>
+          <div class="exp">
+            <div class="exp-head">
+              <div class="l">企业内部知识库助手</div>
+              <div class="period">2024</div>
+            </div>
+            <ul>
+              <li>多文档解析 + 权限隔离，覆盖 8 业务线，DAU 峰值 4.2k</li>
+            </ul>
+          </div>
+          <h3>Education</h3>
+          <div class="exp">
+            <div class="exp-head">
+              <div class="l">浙江大学</div>
+              <div class="period">2016 – 2020</div>
+            </div>
+            <div class="sub">信息管理与信息系统 · 本科</div>
+          </div>
+        </div>
+        <p class="caption"><b>气质：</b>Notion / Linear 高级感。大量留白，让内容自己说话。</p>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
