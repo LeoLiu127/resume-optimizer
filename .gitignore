@@ -41,3 +41,6 @@ lerna-debug.log*
 
 # Vercel / 部署
 .vercel
+
+# 测试临时文件
+test-*.json

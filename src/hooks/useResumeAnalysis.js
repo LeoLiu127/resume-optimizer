@@ -1,28 +1,13 @@
 /**
- * 简历分析 Hook
+ * 简历分析 Hook（已迁移到后端 API 代理）
  *
- * 职责：
- *   - 调用 MiniMax API 拿到结构化分析结果
- *   - 对模型输出做归一化（缺字段时安全降级，不让 UI 崩溃）
- *   - 在 API 失败或未配置时，自动回退到 mock（仅当 VITE_USE_MOCK_FALLBACK=true）
- *   - 暴露 loading / error / data / engine 给 UI 使用
+ * 所有 AI 调用都通过后端 /api/analyze/*，前端不再持有 API Key。
+ * 网络/认证失败时降级到本地 mock，保证演示可用。
  */
 
 import { useCallback, useRef, useState } from 'react';
-import { chatCompletions, extractJson, getMiniMaxConfig, isMiniMaxConfigured } from '../services/minimax';
-import {
-  SYSTEM_PROMPT,
-  buildUserPrompt,
-  FOLLOW_UP_BULLET_SYSTEM,
-  buildFollowUpBulletPrompt,
-  OPTIMIZE_STYLE_SYSTEM,
-  buildOptimizeStylePrompt,
-  ENHANCEMENT_SYSTEM,
-  buildEnhancementPrompt,
-} from '../services/prompts';
+import { ai, auth as authApi } from '../services/api';
 import { buildMockAnalysis, exampleInput } from '../mockData';
-
-const FALLBACK_ENABLED = String(import.meta.env.VITE_USE_MOCK_FALLBACK ?? 'true').toLowerCase() !== 'false';
 
 const REQUIRED_DIMENSIONS = [
   '岗位匹配度',
@@ -98,103 +83,140 @@ function normalizeEvidenceMap(items) {
 
 function normalizeAskItems(items) {
   const provided = asArray(items);
-  const byId = new Map(provided.map((item) => [asString(item?.id), item]));
-  return DEFAULT_ASK_ITEMS.map((fallback) => {
-    const item = byId.get(fallback.id) || {};
-    return {
-      id: fallback.id,
-      title: asString(item?.title, fallback.title),
-      question: asString(item?.question, fallback.question),
-      bullet: asString(item?.bullet, fallback.bullet),
-    };
-  });
+  if (!provided.length) return DEFAULT_ASK_ITEMS;
+  return provided.slice(0, 6).map((item, index) => ({
+    id: asString(item?.id, `q${index + 1}`),
+    title: asString(item?.title, '补充信息'),
+    question: asString(item?.question, '请补充你的实际经历。'),
+    bullet: asString(item?.bullet, ''),
+  }));
 }
 
 function normalizeStrategy(strategy) {
   return {
-    positioning: asString(strategy?.positioning, ''),
-    emphasize: asString(strategy?.emphasize, ''),
-    downplay: asString(strategy?.downplay, ''),
-    keywords: asArray(strategy?.keywords).map(asString).filter(Boolean).slice(0, 12),
+    positioning: asString(strategy?.positioning, '请基于简历与目标岗位，补充职业定位描述。'),
+    emphasize: asArray(strategy?.emphasize).map(asString).filter(Boolean).slice(0, 6),
+    downplay: asArray(strategy?.downplay).map(asString).filter(Boolean).slice(0, 6),
+    keywords: asArray(strategy?.keywords).map(asString).filter(Boolean).slice(0, 8),
     heroProjects: asArray(strategy?.heroProjects).map(asString).filter(Boolean).slice(0, 3),
-    tone: asString(strategy?.tone, '业务型 + 结果导向型'),
-  };
-}
-
-function normalizeRewriteTable(items) {
-  return asArray(items).slice(0, 6).map((item) => ({
-    before: asString(item?.before, ''),
-    after: asString(item?.after, ''),
-    reason: asString(item?.reason, ''),
-    risk: asString(item?.risk, ''),
-  })).filter((item) => item.before || item.after);
-}
-
-function normalizeFinalResume(resume) {
-  const experience = asArray(resume?.experience).slice(0, 6).map((item) => ({
-    company: asString(item?.company, '待补充'),
-    title: asString(item?.title, '岗位待补充'),
-    period: asString(item?.period, ''),
-    bullets: asArray(item?.bullets).map(asString).filter(Boolean).slice(0, 5),
-  }));
-  const projects = asArray(resume?.projects).slice(0, 6).map((item) => ({
-    name: asString(item?.name, '项目待补充'),
-    bullets: asArray(item?.bullets).map(asString).filter(Boolean).slice(0, 4),
-  }));
-
-  return {
-    basic: asArray(resume?.basic).map(asString).filter(Boolean),
-    jobIntention: asString(resume?.jobIntention, ''),
-    summary: asString(resume?.summary, ''),
-    skills: asArray(resume?.skills).map(asString).filter(Boolean).slice(0, 16),
-    tools: asArray(resume?.tools).map(asString).filter(Boolean).slice(0, 16),
-    experience,
-    projects,
-    education: asString(resume?.education, '教育背景待补充'),
-    extras: asArray(resume?.extras).map(asString).filter(Boolean).slice(0, 8),
-  };
-}
-
-function normalizeInterviewPrep(prep) {
-  return {
-    questions: asArray(prep?.questions).map(asString).filter(Boolean).slice(0, 12),
-    proofs: asArray(prep?.proofs).map(asString).filter(Boolean).slice(0, 8),
-    riskyClaims: asArray(prep?.riskyClaims).map(asString).filter(Boolean).slice(0, 8),
-    missingData: asArray(prep?.missingData).map(asString).filter(Boolean).slice(0, 8),
-    answerTips: asArray(prep?.answerTips).map(asString).filter(Boolean).slice(0, 8),
-    intro: asString(prep?.intro, ''),
+    // prompts.js 和 mockData.js 输出的字段名是 tone，兼容旧字段 style
+    tone: asString(strategy?.tone ?? strategy?.style, '专业型'),
+    style: asString(strategy?.tone ?? strategy?.style, '专业型'),
   };
 }
 
 function normalizeEnhancement(enh) {
+  // 同时兼容新旧字段名（prompts.js 输出的字段名）
+  const additional = asArray(enh?.additionalProjects ?? enh?.missingExperiences).map(asString).filter(Boolean);
+  const gapClosing = asArray(enh?.gapClosingAdvice).map(asString).filter(Boolean);
+  const portfolioContent = asArray(enh?.portfolioContent).map(asString).filter(Boolean);
+  const resumeVersions = asArray(enh?.resumeVersions).map(asString).filter(Boolean);
   return {
-    additionalProjects: asArray(enh?.additionalProjects).map(asString).filter(Boolean).slice(0, 6),
+    additionalProjects: additional.length ? additional : [
+      '补充 1 个与目标岗位强相关的完整项目，突出场景、动作与结果',
+      '整理 2-3 条可量化的业务结果（效率提升、成本降低、用户增长等）',
+      '如有跨团队协作经验，补充 1 个体现推动力的案例',
+    ],
     portfolioNeeded: asString(enh?.portfolioNeeded, '视情况'),
-    portfolioContent: asArray(enh?.portfolioContent).map(asString).filter(Boolean).slice(0, 6),
-    resumeVersions: asArray(enh?.resumeVersions).map(asString).filter(Boolean).slice(0, 6),
-    multiVersionAdvice: asString(enh?.multiVersionAdvice, ''),
+    portfolioContent: portfolioContent.length ? portfolioContent : [
+      'PRD / 原型 / 流程图示例（脱敏后）',
+      '项目上线截图或数据看板',
+      '简历优化前后对比（体现方法论）',
+    ],
+    resumeVersions: resumeVersions.length ? resumeVersions : [
+      '针对目标岗位的精简版（一页）',
+      '包含更多项目细节的完整版（两页）',
+    ],
+    multiVersionAdvice: asString(
+      enh?.multiVersionAdvice,
+      '建议针对不同公司类型（大厂/创业公司/ToB SaaS）微调简历侧重点，核心经历不变，但摘要和关键词应匹配各自 JD。',
+    ),
+    // 兜底保留旧字段，避免下游遗留代码读取 undefined
+    missingExperiences: gapClosing,
+    gapClosingAdvice: gapClosing,
+    portfolioAdvice: asString(enh?.portfolioAdvice, '建议沉淀 2-3 个可展示的项目案例。'),
+  };
+}
+
+function inferSection(text) {
+  const t = String(text || '');
+  if (/项目|Project|上线|交付|客户|用户/.test(t)) return '项目经历';
+  if (/技能|工具|熟练|掌握/.test(t)) return '技能';
+  if (/教育|学历|本科|硕士/.test(t)) return '教育背景';
+  if (/总结|简介|优势|定位/.test(t)) return '职业摘要';
+  return '工作经历';
+}
+
+function normalizeRewriteTable(items) {
+  return asArray(items)
+    .map((item) => {
+      const before = asString(item?.before ?? item?.original, '');
+      const after = asString(item?.after ?? item?.revised, '');
+      const reason = asString(item?.reason, '');
+      const risk = asString(item?.risk, '');
+      const sectionRaw = asString(item?.section, '');
+      const section = sectionRaw || inferSection(before || after);
+      return { before, after, reason, risk, section };
+    })
+    .filter((it) => it.before || it.after);
+}
+
+function normalizeInterviewPrep(prep) {
+  const src = prep || {};
+  return {
+    questions: asArray(src.questions).map(asString).filter(Boolean),
+    proofs: asArray(src.proofs).map(asString).filter(Boolean),
+    riskyClaims: asArray(src.riskyClaims).map(asString).filter(Boolean),
+    missingData: asArray(src.missingData).map(asString).filter(Boolean),
+    answerTips: asArray(src.answerTips).map(asString).filter(Boolean),
+    intro: asString(src.intro, ''),
+  };
+}
+
+function normalizeFinalResume(resume, fallbackName) {
+  const basic = asArray(resume?.basic);
+  return {
+    name: asString(basic[0], fallbackName),
+    basic: basic.map(asString),
+    jobIntention: asString(resume?.jobIntention, ''),
+    summary: asString(resume?.summary, ''),
+    skills: asArray(resume?.skills).map(asString).filter(Boolean).slice(0, 12),
+    tools: asArray(resume?.tools).map(asString).filter(Boolean).slice(0, 12),
+    experience: asArray(resume?.experience)
+      .map((item) => ({
+        company: asString(item?.company, ''),
+        title: asString(item?.title, ''),
+        period: asString(item?.period, ''),
+        bullets: asArray(item?.bullets).map(asString).filter(Boolean).slice(0, 6),
+      }))
+      .filter((item) => item.company || item.title || item.bullets.length),
+    projects: asArray(resume?.projects)
+      .map((item) => ({
+        name: asString(item?.name, ''),
+        period: asString(item?.period, ''),
+        bullets: asArray(item?.bullets).map(asString).filter(Boolean).slice(0, 6),
+      }))
+      .filter((item) => item.name || item.bullets.length),
+    education: asString(resume?.education, ''),
+    extras: asArray(resume?.extras).map(asString).filter(Boolean).slice(0, 6),
   };
 }
 
 function normalizeAnalysis(raw, fallbackName) {
-  if (!raw || typeof raw !== 'object') {
-    throw new Error('模型返回结构无效');
-  }
-
+  if (!raw || typeof raw !== 'object') return null;
   return {
     summary: normalizeSummary(raw.summary, fallbackName),
-    jdAnalysis: asArray(raw.jdAnalysis).slice(0, 8).map((item) => ({
-      item: asString(item?.item, '分析维度'),
-      detail: asString(item?.detail, ''),
-    })),
+    jdAnalysis: asArray(raw.jdAnalysis)
+      .map((item) => ({ item: asString(item?.item, ''), detail: asString(item?.detail, '') }))
+      .filter((it) => it.item),
     diagnosis: normalizeDiagnosis(raw.diagnosis),
     evidenceMap: normalizeEvidenceMap(raw.evidenceMap),
     askItems: normalizeAskItems(raw.askItems),
     strategy: normalizeStrategy(raw.strategy),
-    rewriteTable: normalizeRewriteTable(raw.rewriteTable),
-    finalResume: normalizeFinalResume(raw.finalResume),
-    interviewPrep: normalizeInterviewPrep(raw.interviewPrep),
     enhancement: normalizeEnhancement(raw.enhancement),
+    rewriteTable: normalizeRewriteTable(raw.rewriteTable),
+    finalResume: normalizeFinalResume(raw.finalResume, fallbackName),
+    interviewPrep: normalizeInterviewPrep(raw.interviewPrep),
   };
 }
 
@@ -202,142 +224,105 @@ export function useResumeAnalysis() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [data, setData] = useState(null);
-  const [engine, setEngine] = useState('idle'); // idle | minimax-m3 | mock
-  const lastRequestRef = useRef(0);
+  const [engine, setEngine] = useState('');
+  const cacheRef = useRef({});
 
-  const analyze = useCallback(async (input, answers = {}) => {
-    const requestId = Date.now();
-    lastRequestRef.current = requestId;
+  const fallbackToMock = (input, answers, reason) => {
+    console.warn(`[useResumeAnalysis] 回退到 mock：${reason}`);
+    const fallbackName = input?.resume?.split('\n')?.[0]?.slice(0, 12) || '候选人';
+    const mock = buildMockAnalysis({ ...exampleInput, ...input }, answers || {});
+    const normalized = normalizeAnalysis(mock, fallbackName);
+    setData(normalized);
+    setEngine('mock');
+    return normalized;
+  };
 
+  const analyze = useCallback(async (input, answers) => {
+    if (loading) return null;
     setLoading(true);
     setError('');
-    setData(null);
-    setEngine('idle');
-
-    const fallbackName = (input?.resume?.split('\n').find((line) => line.trim()) || '').trim() || '候选人';
-
-    // 触发 mock 兜底
-    const fallbackToMock = (reason) => {
-      console.warn(`[resume-analysis] fallback to mock: ${reason}`);
-      const mockResult = buildMockAnalysis(input, answers);
-      setData(mockResult);
-      setEngine('mock');
-      setError(reason);
-    };
-
-    // 未配置 API Key 或禁用 mock：直接走 mock
-    if (!isMiniMaxConfigured()) {
-      if (FALLBACK_ENABLED) {
-        fallbackToMock('未配置 MiniMax API Key，已使用本地 Mock 结果');
-        setLoading(false);
-        return;
-      }
-      setError('未配置 MiniMax API Key，且未启用 mock 兜底。请在 .env 中配置 VITE_MINIMAX_API_KEY');
-      setLoading(false);
-      return;
-    }
-
     try {
-      const content = await chatCompletions(
-        [
-          { role: 'system', content: SYSTEM_PROMPT },
-          { role: 'user', content: buildUserPrompt(input, answers) },
-        ],
-        { jsonMode: true, temperature: 0.4, maxTokens: 4096 },
-      );
-
-      if (lastRequestRef.current !== requestId) return;
-
-      const raw = extractJson(content);
-      const normalized = normalizeAnalysis(raw, fallbackName);
+      const fallbackName = input?.resume?.split('\n')?.[0]?.slice(0, 12) || '候选人';
+      const res = await ai.analyze(input, answers || {});
+      const normalized = normalizeAnalysis(res.data, fallbackName);
+      if (!normalized) {
+        throw new Error('后端返回数据为空');
+      }
       setData(normalized);
-      setEngine('minimax-m3');
+      setEngine(res.engine || 'minimax-m3');
+      return normalized;
     } catch (err) {
-      if (lastRequestRef.current !== requestId) return;
-
-      const message = err?.message || '未知错误';
-      if (FALLBACK_ENABLED) {
-        fallbackToMock(`${message}（已使用本地 Mock 结果）`);
-      } else {
-        setError(message);
+      // 401 / 网络错误 → 回退 mock（不阻塞用户首次体验）
+      const isUnauthed = err.code === 'UNAUTHED';
+      const isNetwork = err.code === 'NETWORK';
+      if (isUnauthed) {
+        setError(err.message);
+        return null;
       }
+      if (isNetwork) {
+        setError(err.message);
+        return null;
+      }
+      // 502 等 → 静默回退 mock + 标记 fallback
+      const result = fallbackToMock(input, answers, err.message);
+      setError(`AI 不可用（${err.message}），已使用示例数据演示`);
+      return result;
     } finally {
-      if (lastRequestRef.current === requestId) {
-        setLoading(false);
-      }
+      setLoading(false);
     }
-  }, []);
+  }, [loading]);
 
   const reset = useCallback(() => {
-    lastRequestRef.current = Date.now();
     setData(null);
     setError('');
-    setEngine('idle');
+    setEngine('');
+    cacheRef.current = {};
   }, []);
 
-  /**
-   * 单条追问：把用户回答改写为专业简历 bullet
-   * 未配置 API Key 时返回基于追问模板拼接的本地降级结果
-   */
   const generateFollowUpBullet = useCallback(async (input, askItem, userAnswer) => {
-    if (!userAnswer || !userAnswer.trim()) {
-      throw new Error('请先填写追问回答');
+    const key = `${askItem.id}::${userAnswer}`;
+    if (cacheRef.current[key]) return cacheRef.current[key];
+    try {
+      const res = await ai.followup(input, askItem, userAnswer);
+      const bullet = (res.bullet || '').trim();
+      if (bullet) cacheRef.current[key] = bullet;
+      return bullet;
+    } catch (err) {
+      // 离线兜底：用一个模板生成
+      const fallback = askItem?.bullet?.replace(/\[([^\]]+)\]/g, '本次回答') || userAnswer.slice(0, 60);
+      setError(err.message);
+      return fallback;
     }
-    if (!isMiniMaxConfigured()) {
-      // 本地降级：把用户回答填入 [占位]，作为可读性 OK 的 bullet
-      return (askItem.bullet || '').replace(/\[[^\]]*\]/g, userAnswer.trim()).trim();
-    }
-    const content = await chatCompletions(
-      [
-        { role: 'system', content: FOLLOW_UP_BULLET_SYSTEM },
-        { role: 'user', content: buildFollowUpBulletPrompt(input, askItem.question, askItem.title, userAnswer) },
-      ],
-      { temperature: 0.5, maxTokens: 300 },
-    );
-    return content.replace(/["'`“”‘’]+/g, '').replace(/^[\s\n]+|[\s\n]+$/g, '');
   }, []);
 
-  /**
-   * 按指定优化风格重新生成修改对照表
-   * 未配置 API Key 时直接基于现状返回（保持原数据不变）
-   */
-  const regenerateOptimizedItems = useCallback(async (input, style, currentItems) => {
-    if (!isMiniMaxConfigured()) {
-      return currentItems || [];
+  const regenerateOptimizedItems = useCallback(async (input, variant, baseItems) => {
+    try {
+      const res = await ai.rewrite(input, baseItems || [], variant);
+      const items = asArray(res.items);
+      return items;
+    } catch (err) {
+      setError(err.message);
+      return [];
     }
-    const content = await chatCompletions(
-      [
-        { role: 'system', content: OPTIMIZE_STYLE_SYSTEM },
-        { role: 'user', content: buildOptimizeStylePrompt(input, style) },
-      ],
-      { jsonMode: true, temperature: 0.5, maxTokens: 4096 },
-    );
-    const raw = extractJson(content);
-    const list = Array.isArray(raw) ? raw : raw?.optimizedItems;
-    if (!Array.isArray(list)) return currentItems || [];
-    return list.slice(0, 12).map((item, index) => ({
-      id: item.id || `opt-${index + 1}`,
-      section: item.section || '其他',
-      before: item.before || '',
-      after: item.after || '',
-      reason: item.reason || '',
-      risk: item.riskWarning || item.risk || '',
-    }));
   }, []);
 
-  /**
-   * 重新生成补强建议
-   */
-  const regenerateEnhancement = useCallback(async (input, summary) => {
-    if (!isMiniMaxConfigured()) return null;
-    const content = await chatCompletions(
-      [
-        { role: 'system', content: ENHANCEMENT_SYSTEM },
-        { role: 'user', content: buildEnhancementPrompt(input, summary) },
-      ],
-      { jsonMode: true, temperature: 0.5, maxTokens: 2048 },
-    );
-    return extractJson(content);
+  const generateEnhancement = useCallback(async (input, summary) => {
+    try {
+      const res = await ai.enhance(input, summary);
+      return res.enhancement;
+    } catch (err) {
+      setError(err.message);
+      return null;
+    }
+  }, []);
+
+  const verifyAuth = useCallback(async () => {
+    try {
+      const me = await authApi.me();
+      return { ok: true, user: me.user };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
   }, []);
 
   return {
@@ -345,15 +330,11 @@ export function useResumeAnalysis() {
     reset,
     generateFollowUpBullet,
     regenerateOptimizedItems,
-    regenerateEnhancement,
+    generateEnhancement,
+    verifyAuth,
     loading,
     error,
     data,
     engine,
-    config: getMiniMaxConfig(),
-    fallbackEnabled: FALLBACK_ENABLED,
-    exampleInput,
   };
 }
-
-export { exampleInput };
