@@ -7,7 +7,7 @@ export const steps = [
   '简历优化',
   '面试准备',
   '补强建议',
-  '导出结果',
+  '简历导出',
 ];
 
 export const exampleInput = {

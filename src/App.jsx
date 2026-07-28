@@ -40,6 +40,7 @@ import {
   createAnalysisContextKey,
   isAnalysisCurrent,
 } from './services/analysisContext';
+import { ANALYSIS_ACTION_HINT, getAnalysisActionLabel } from './services/uiCopy';
 import { ExportPanel } from './components/ExportPanel';
 import { AuthGate } from './components/AuthGate';
 import { AdminPanel } from './components/AdminPanel';
@@ -1188,8 +1189,8 @@ function App() {
         return (
           <section className="panel-stack">
             <HeaderBlock
-              title="导出结果"
-              subtitle="选择模板、预览效果，一键导出 PDF 或 Word 版本。"
+              title="简历导出"
+              subtitle="选择语言、模板与格式，预览并导出定制简历。"
             />
             <div className="summary-grid">
               <div className="summary-tile">
@@ -1338,14 +1339,17 @@ function App() {
               <Shield size={12} /> {adminView ? '返回' : '管理'}
             </button>
           ) : null}
-        </div>
-        <div className="topbar-main-action">
-          <button className="primary-button" onClick={handleAnalyze} disabled={loading || preparingAnalysis}>
-            {loading || preparingAnalysis ? '解析中…' : activeStep === 0 ? '岗位解析' : '重新解析'}
+          <button
+            className="primary-button topbar-analysis-action"
+            onClick={handleAnalyze}
+            disabled={loading || preparingAnalysis}
+            title={analysisStarted ? ANALYSIS_ACTION_HINT : '生成完整的岗位分析与定制简历'}
+          >
+            {getAnalysisActionLabel({
+              busy: loading || preparingAnalysis,
+              hasAnalysis: analysisIsCurrent,
+            })}
           </button>
-          {activeStep !== 0 && analysisStarted ? (
-            <span className="main-action-hint">更新输入或追问回答后，点击重新解析刷新全部结果</span>
-          ) : null}
         </div>
       </header>
 
