@@ -1651,6 +1651,24 @@ button:disabled {
   font-size: 0 !important;
 }
 
+.export-preview-paper > .export-preview-placeholder {
+  min-height: 480px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 24px;
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  font-size: 13px !important;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.export-preview-placeholder span {
+  max-width: 300px;
+}
+
 .export-preview-paper svg,
 .export-preview-paper img {
   max-width: 100%;

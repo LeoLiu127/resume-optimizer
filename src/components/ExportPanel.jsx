@@ -4,7 +4,11 @@ import { ClassicPreview, ModernPreview, MinimalPreview } from '../templates/Prev
 import { exportPdf, exportDocx } from '../services/exportResume';
 import { ai } from '../services/api';
 import { LANGUAGES, TEMPLATES } from '../templates/templateCatalog';
-import { buildLocalizedAnalysis, createEnglishCacheKey } from '../services/resumeExportLanguage';
+import {
+  createEnglishCacheKey,
+  deriveLocalizedExport,
+  shouldApplyEnglishResponse,
+} from '../services/resumeExportLanguage';
 import { buildResumeView } from '../utils/resumeData';
 
 const FORMATS = [
@@ -17,6 +21,7 @@ export function ExportPanel({ analysis, role }) {
   const [format, setFormat] = useState('pdf');
   const [language, setLanguage] = useState('zh');
   const [englishState, setEnglishState] = useState('idle');
+  const [englishStateKey, setEnglishStateKey] = useState('');
   const [englishError, setEnglishError] = useState('');
   const [englishPayload, setEnglishPayload] = useState(null);
   const [englishRetry, setEnglishRetry] = useState(0);
@@ -31,29 +36,41 @@ export function ExportPanel({ analysis, role }) {
     () => (analysis?.finalResume ? createEnglishCacheKey(analysis.finalResume, role) : ''),
     [analysis?.finalResume, role],
   );
+  const activeEnglishKey = language === 'en' ? englishKey : '';
+  requestKeyRef.current = activeEnglishKey;
+  const cachedEnglishPayload = activeEnglishKey
+    ? englishCacheRef.current.get(activeEnglishKey)
+    : null;
 
   useEffect(() => {
-    if (language !== 'en') return undefined;
+    if (language !== 'en') {
+      setEnglishPayload(null);
+      setEnglishState('idle');
+      setEnglishStateKey('');
+      setEnglishError('');
+      return undefined;
+    }
 
     if (!englishKey) {
-      requestKeyRef.current = '';
       setEnglishPayload(null);
       setEnglishState('error');
+      setEnglishStateKey(englishKey);
       setEnglishError('暂无可翻译的简历内容');
       return undefined;
     }
 
-    requestKeyRef.current = englishKey;
     const cachedPayload = englishCacheRef.current.get(englishKey);
     if (cachedPayload) {
       setEnglishPayload({ key: englishKey, payload: cachedPayload });
       setEnglishState('ready');
+      setEnglishStateKey(englishKey);
       setEnglishError('');
       return undefined;
     }
 
     setEnglishPayload(null);
     setEnglishState('loading');
+    setEnglishStateKey(englishKey);
     setEnglishError('');
     const pendingRequest = englishRequestRef.current.get(englishKey);
     if (pendingRequest) return undefined;
@@ -63,15 +80,17 @@ export function ExportPanel({ analysis, role }) {
     request
       .then((payload) => {
         englishCacheRef.current.set(englishKey, payload);
-        if (requestKeyRef.current !== englishKey) return;
+        if (!shouldApplyEnglishResponse(requestKeyRef.current, englishKey)) return;
         setEnglishPayload({ key: englishKey, payload });
         setEnglishState('ready');
+        setEnglishStateKey(englishKey);
         setEnglishError('');
       })
       .catch((err) => {
-        if (requestKeyRef.current !== englishKey) return;
+        if (!shouldApplyEnglishResponse(requestKeyRef.current, englishKey)) return;
         setEnglishPayload(null);
         setEnglishState('error');
+        setEnglishStateKey(englishKey);
         setEnglishError(err?.message || '英文简历生成失败，请重试');
       })
       .finally(() => {
@@ -82,18 +101,22 @@ export function ExportPanel({ analysis, role }) {
     return undefined;
   }, [analysis?.finalResume, englishKey, englishRetry, language, role]);
 
-  const localizedAnalysis = language === 'en' && englishPayload?.key === englishKey
-    ? buildLocalizedAnalysis(analysis, englishPayload.payload)
-    : null;
-  const exportAnalysis = localizedAnalysis || analysis;
-  const exportRole = exportAnalysis?.summary?.role || role;
+  const localizedExport = deriveLocalizedExport({
+    analysis,
+    language,
+    englishKey,
+    englishState,
+    englishStateKey,
+    englishPayload,
+    cachedPayload: cachedEnglishPayload,
+  });
+  const exportAnalysis = localizedExport.analysis;
+  const exportRole = exportAnalysis?.summary?.role || (language === 'zh' ? role : '');
   const view = useMemo(() => buildResumeView(exportAnalysis), [exportAnalysis]);
   const currentTemplate = TEMPLATES.find((t) => t.key === templateKey);
-  const englishUnavailable = language === 'en'
-    && (englishState !== 'ready' || !localizedAnalysis);
 
   const handleExport = async () => {
-    if (exporting || englishUnavailable) return;
+    if (exporting || !localizedExport.canExport) return;
     setExporting(true);
     setExportError('');
     try {
@@ -139,12 +162,12 @@ export function ExportPanel({ analysis, role }) {
               </button>
             ))}
           </div>
-          {language === 'en' && englishState === 'loading' ? (
+          {language === 'en' && localizedExport.state === 'loading' ? (
             <div className="export-language-status" role="status" aria-live="polite" aria-busy="true">
               <Loader2 size={14} className="spin" /> 正在生成英文简历…
             </div>
           ) : null}
-          {language === 'en' && englishState === 'error' ? (
+          {language === 'en' && localizedExport.state === 'error' ? (
             <div className="export-language-error" role="alert">
               <AlertTriangle size={14} />
               <span>{englishError}</span>
@@ -205,16 +228,16 @@ export function ExportPanel({ analysis, role }) {
           type="button"
           className="primary-button export-action"
           onClick={handleExport}
-          disabled={exporting || !view || englishUnavailable}
+          disabled={exporting || !view || !localizedExport.canExport}
         >
           {exporting ? (
             <>
               <Loader2 size={16} className="spin" /> 正在生成 {format.toUpperCase()}…
             </>
-          ) : englishUnavailable ? (
+          ) : !localizedExport.canExport ? (
             <>
-              <Loader2 size={16} className={englishState === 'loading' ? 'spin' : ''} />
-              {englishState === 'loading' ? '正在生成英文简历…' : '英文简历暂不可导出'}
+              <Loader2 size={16} className={localizedExport.state === 'loading' ? 'spin' : ''} />
+              {localizedExport.state === 'loading' ? '正在生成英文简历…' : '英文简历暂不可导出'}
             </>
           ) : (
             <>
@@ -223,7 +246,13 @@ export function ExportPanel({ analysis, role }) {
           )}
         </button>
         <p className="export-hint">
-          文件名：<code>{view?.name || '候选人'}_{exportRole || '岗位'}_{currentTemplate?.name}_{language.toUpperCase()}.{format}</code>
+          {localizedExport.canExport ? (
+            <>文件名：<code>{view?.name || '候选人'}_{exportRole || '岗位'}_{currentTemplate?.name}_{language.toUpperCase()}.{format}</code></>
+          ) : language === 'en' ? (
+            '文件名：等待英文简历生成完成'
+          ) : (
+            '文件名：暂无可导出的简历'
+          )}
         </p>
       </div>
 
@@ -235,9 +264,31 @@ export function ExportPanel({ analysis, role }) {
         </div>
         <div className="export-preview-stage">
           <div className="export-preview-paper">
-            {templateKey === 'classic' && <ClassicPreview view={view} role={exportRole} language={language} />}
-            {templateKey === 'modern' && <ModernPreview view={view} role={exportRole} accent={currentTemplate.accent} language={language} />}
-            {templateKey === 'minimal' && <MinimalPreview view={view} role={exportRole} language={language} />}
+            {view ? (
+              <>
+                {templateKey === 'classic' && <ClassicPreview view={view} role={exportRole} language={language} />}
+                {templateKey === 'modern' && <ModernPreview view={view} role={exportRole} accent={currentTemplate.accent} language={language} />}
+                {templateKey === 'minimal' && <MinimalPreview view={view} role={exportRole} language={language} />}
+              </>
+            ) : (
+              <div
+                className="export-preview-placeholder"
+                role={language === 'en' && localizedExport.state === 'error' ? 'alert' : 'status'}
+                aria-live="polite"
+              >
+                {language === 'en' && localizedExport.state === 'error' ? (
+                  <>
+                    <AlertTriangle size={16} />
+                    <span>{englishError}</span>
+                    <button type="button" className="export-retry-btn" onClick={retryEnglish}>重试</button>
+                  </>
+                ) : language === 'en' ? (
+                  <><Loader2 size={16} className="spin" /> 正在生成英文预览…</>
+                ) : (
+                  '暂无可预览简历'
+                )}
+              </div>
+            )}
           </div>
         </div>
       </div>
