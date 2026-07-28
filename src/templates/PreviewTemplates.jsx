@@ -12,7 +12,8 @@ const baseStyle = {
   width: '100%',
   aspectRatio: '210 / 297',
   boxSizing: 'border-box',
-  overflow: 'hidden',
+  overflowX: 'hidden',
+  overflowY: 'auto',
   position: 'relative',
 };
 
@@ -191,6 +192,7 @@ export function ModernPreview({ view, role, accent, language = 'zh' }) {
   const labels = labelsFor(language);
   const precisionAccent = '#32B7A4';
   const monogram = String(view.name || 'CV').replace(/\s/g, '').slice(0, 2).toUpperCase();
+  const contacts = [view.phone, view.email, view.location].filter(Boolean);
   void accent;
 
   return (
@@ -211,7 +213,6 @@ export function ModernPreview({ view, role, accent, language = 'zh' }) {
           color: '#ffffff',
           padding: '25px 15px 20px',
           boxSizing: 'border-box',
-          overflow: 'hidden',
         }}
       >
         <div
@@ -230,21 +231,25 @@ export function ModernPreview({ view, role, accent, language = 'zh' }) {
           {monogram}
         </div>
 
-        <RailHeading>{labels.contact}</RailHeading>
-        {[view.phone, view.email, view.location].filter(Boolean).map((value) => (
-          <div
-            key={value}
-            style={{
-              marginBottom: 4,
-              color: '#d6dfeb',
-              fontSize: 7.5,
-              lineHeight: 1.5,
-              overflowWrap: 'anywhere',
-            }}
-          >
-            {value}
-          </div>
-        ))}
+        {contacts.length ? (
+          <>
+            <RailHeading>{labels.contact}</RailHeading>
+            {contacts.map((value) => (
+              <div
+                key={value}
+                style={{
+                  marginBottom: 4,
+                  color: '#d6dfeb',
+                  fontSize: 7.5,
+                  lineHeight: 1.5,
+                  overflowWrap: 'anywhere',
+                }}
+              >
+                {value}
+              </div>
+            ))}
+          </>
+        ) : null}
 
         {view.skills.length ? (
           <>
@@ -283,7 +288,6 @@ export function ModernPreview({ view, role, accent, language = 'zh' }) {
           padding: '26px 22px 20px',
           boxSizing: 'border-box',
           background: '#ffffff',
-          overflow: 'hidden',
         }}
       >
         <div

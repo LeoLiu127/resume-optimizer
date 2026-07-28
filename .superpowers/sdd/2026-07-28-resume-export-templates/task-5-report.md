@@ -92,3 +92,61 @@ Source visual truth:
   paginated; pagination is outside Task 5.
 - PDF and DOCX remain on their previous visual implementations by design and are
   deferred to Task 6.
+
+---
+
+## Round 1 Fix — Preserve Long Preview Content
+
+### Baseline
+
+- Started from Task 5 commit:
+  `96a324cdefcbf57a514c923ad9ac68d755162ca9`.
+
+### RED
+
+- Replaced the source-text matching test with actual component execution:
+  - Vite middleware-mode SSR loads `PreviewTemplates.jsx`.
+  - ReactDOM Server renders each exported component to real static markup.
+  - Vite's test cache is isolated under the operating-system temporary directory and
+    is removed after the test.
+- Added behavior coverage for exports, direction classes, Chinese/English labels,
+  Modern 31/69 layout and rail placement, absence of fake proficiency markup,
+  Minimal localization, empty contacts, and long content accessibility.
+- Ran `cd server && node --test test/template-contract.test.mjs`.
+- Result: 4 passed, 2 failed for the intended production defects:
+  - Modern rendered `Contact` with no email, phone, or location.
+  - Template roots rendered `overflow:hidden` instead of a vertically accessible
+    content strategy.
+
+### GREEN
+
+- Changed the shared A4 preview root from blanket clipping to:
+  - `overflowX: 'hidden'`
+  - `overflowY: 'auto'`
+- Removed `overflow:hidden` from the Modern rail and main column so the root owns
+  vertical access for the complete grid.
+- Rendered the Modern contact heading and values only when at least one real contact
+  fact exists.
+- Kept all skills, tools, experiences, projects, bullets, and extras intact; no
+  `slice` or other fact truncation was introduced.
+- Renamed all focused cases with the `preview templates` prefix so the original
+  name-pattern command executes the entire file.
+- Focused result:
+  6 tests passed, 0 failed.
+- Full server result:
+  84 tests passed, 0 failed.
+- Final Vite production build:
+  passed with only the existing large-chunk warning.
+
+### Round 1 Commit
+
+- Subject: `fix: preserve long resume preview content`
+- The resulting hash is reported by the implementing agent after commit creation.
+
+### Round 1 Remaining Concerns
+
+- The HTML preview now makes all content vertically accessible inside the fixed A4
+  viewport. It intentionally does not paginate; PDF/DOCX pagination remains Task 6.
+- Codex in-app browser screenshot QA remains unavailable because of the previously
+  recorded `EPERM` initialization failure. Real SSR tests now verify the rendered
+  component contracts, but they do not replace pixel-level browser comparison.
