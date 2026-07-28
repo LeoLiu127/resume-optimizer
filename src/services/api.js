@@ -257,6 +257,12 @@ export const ai = {
   enhance(input, summary) {
     return request('/api/analyze/enhance', { method: 'POST', body: { input, summary } });
   },
+  resumeEnglish(finalResume, role) {
+    return request('/api/analyze/resume-english', {
+      method: 'POST',
+      body: { finalResume, role },
+    });
+  },
 };
 
 export const apiConfig = { API_BASE };

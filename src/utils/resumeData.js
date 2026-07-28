@@ -1,3 +1,5 @@
+import { TEMPLATES } from '../templates/templateCatalog.js';
+
 /**
  * 把 analysis.finalResume 归一化成所有模板都能消费的标准化数据
  */
@@ -73,13 +75,15 @@ function applyVariant(text, variant) {
 /**
  * 把 {name, view} 转成下载文件名
  */
-export function buildFileName(view, role, templateKey, ext) {
+export function buildFileName(view, role, templateKey, ext, language = 'zh') {
   const safe = (str) =>
     String(str || '')
       .trim()
       .replace(/[\\/:*?"<>|]/g, '')
       .replace(/\s+/g, '_')
       .slice(0, 40) || '简历';
-  const tagMap = { classic: 'Classic', modern: 'Modern', minimal: 'Minimal' };
-  return `${safe(view.name)}_${safe(role)}_${tagMap[templateKey] || templateKey}.${ext}`;
+  const template = TEMPLATES.find(({ key }) => key === templateKey);
+  const templateTag = template?.fileTag || templateKey;
+  const languageTag = language === 'en' ? 'EN' : 'ZH';
+  return `${safe(view.name)}_${safe(role)}_${safe(templateTag)}_${languageTag}.${ext}`;
 }
