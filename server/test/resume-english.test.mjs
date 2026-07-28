@@ -14,9 +14,9 @@ const source = {
   skills: ['需求分析', '项目管理'],
   tools: ['Figma'],
   experience: [{ company: 'A科技', title: '产品经理', period: '2021-至今', bullets: ['负责需求', '推进上线'] }],
-  projects: [],
+  projects: [{ name: 'AI助手', period: '2024', bullets: ['完成原型验证'] }],
   education: 'XX大学 本科',
-  extras: [],
+  extras: ['PMP证书'],
 };
 
 function translatedResume() {
@@ -26,12 +26,16 @@ function translatedResume() {
     jobIntention: 'AI Product Manager',
     summary: 'Enterprise product manager.',
     skills: ['Requirements Analysis', 'Project Management'],
+    tools: [...source.tools],
     experience: [{
       company: 'A科技',
       title: 'Product Manager',
       period: '2021-Present',
       bullets: ['Owned requirements', 'Drove launch'],
     }],
+    projects: [{ name: 'AI Assistant', period: '2024', bullets: ['Completed prototype validation'] }],
+    education: 'XX University, Bachelor of Arts',
+    extras: ['PMP Certification'],
   };
 }
 
@@ -53,7 +57,7 @@ test('english resume normalization keeps all schema fields', () => {
   }, { finalResume: source, role: 'AI产品经理' });
   assert.equal(normalized.role, 'AI Product Manager');
   assert.equal(normalized.finalResume.basic[0], 'Zhang Chen');
-  assert.deepEqual(normalized.finalResume.projects, []);
+  assert.deepEqual(normalized.finalResume.projects, translatedResume().projects);
 });
 
 test('english resume normalization rejects incomplete model schema fields', () => {
@@ -94,6 +98,46 @@ test('english resume normalization rejects translated arrays or bullets that los
       /英文简历结构无效/,
     );
   }
+});
+
+test('english resume normalization rejects empty translated facts that are nonempty in the source', () => {
+  const mutations = [
+    (response) => { response.role = '   '; },
+    (response) => { response.finalResume.jobIntention = '   '; },
+    (response) => { response.finalResume.summary = ''; },
+    (response) => { response.finalResume.education = '  '; },
+    (response) => { response.finalResume.basic[0] = ''; },
+    (response) => { response.finalResume.skills[0] = '   '; },
+    (response) => { response.finalResume.tools[0] = ''; },
+    (response) => { response.finalResume.extras[0] = ' '; },
+    (response) => { response.finalResume.experience[0].company = ''; },
+    (response) => { response.finalResume.experience[0].title = ' '; },
+    (response) => { response.finalResume.experience[0].period = ''; },
+    (response) => { response.finalResume.experience[0].bullets[0] = ' '; },
+    (response) => { response.finalResume.projects[0].name = ''; },
+    (response) => { response.finalResume.projects[0].period = ' '; },
+    (response) => { response.finalResume.projects[0].bullets[0] = ''; },
+  ];
+
+  for (const mutate of mutations) {
+    const response = { role: 'AI Product Manager', finalResume: translatedResume() };
+    mutate(response);
+    assert.throws(
+      () => normalizeEnglishResume(response, { finalResume: source, role: 'AI产品经理' }),
+      /英文简历结构无效/,
+    );
+  }
+});
+
+test('english resume normalization permits empty translated facts when the source fact is empty', () => {
+  const emptySource = { ...source, summary: '' };
+  const translated = translatedResume();
+  translated.summary = '   ';
+
+  assert.doesNotThrow(() => normalizeEnglishResume(
+    { role: '', finalResume: translated },
+    { finalResume: emptySource, role: '' },
+  ));
 });
 
 test('english resume normalization rejects a response without finalResume', () => {

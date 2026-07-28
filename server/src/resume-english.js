@@ -73,6 +73,42 @@ function assertPreservedEntryCounts(source, translated) {
   });
 }
 
+function assertRetainedFact(sourceValue, translatedValue, path) {
+  if (sourceValue.trim() && !translatedValue.trim()) {
+    invalidSchema(`${path} 不可为空`);
+  }
+}
+
+function assertRetainedStringArray(source, translated, path) {
+  source.forEach((value, index) => {
+    assertRetainedFact(value, translated[index], `${path}[${index}]`);
+  });
+}
+
+function assertPreservedNonEmptyFacts(source, translated, sourceRole, translatedRole) {
+  assertRetainedFact(sourceRole, translatedRole, 'role');
+  for (const field of ['jobIntention', 'summary', 'education']) {
+    assertRetainedFact(source[field], translated[field], `finalResume.${field}`);
+  }
+  for (const field of ['basic', 'skills', 'tools', 'extras']) {
+    assertRetainedStringArray(source[field], translated[field], `finalResume.${field}`);
+  }
+  source.experience.forEach((item, index) => {
+    const translatedItem = translated.experience[index];
+    for (const field of ['company', 'title', 'period']) {
+      assertRetainedFact(item[field], translatedItem[field], `finalResume.experience[${index}].${field}`);
+    }
+    assertRetainedStringArray(item.bullets, translatedItem.bullets, `finalResume.experience[${index}].bullets`);
+  });
+  source.projects.forEach((item, index) => {
+    const translatedItem = translated.projects[index];
+    for (const field of ['name', 'period']) {
+      assertRetainedFact(item[field], translatedItem[field], `finalResume.projects[${index}].${field}`);
+    }
+    assertRetainedStringArray(item.bullets, translatedItem.bullets, `finalResume.projects[${index}].bullets`);
+  });
+}
+
 function normalizeFinalResume(resume) {
   return {
     basic: [...resume.basic],
@@ -102,6 +138,7 @@ export function normalizeEnglishResume(value, fallback = {}) {
   validateEnglishResumeRequest(value.finalResume);
   validateEnglishResumeRequest(fallback.finalResume);
   assertPreservedEntryCounts(fallback.finalResume, value.finalResume);
+  assertPreservedNonEmptyFacts(fallback.finalResume, value.finalResume, fallback.role || '', value.role);
 
   return {
     role: value.role,
