@@ -12,13 +12,16 @@ router.use(requireAuth);
  */
 router.get('/', (req, res) => {
   const db = getDb();
-  const rows = db
-    .prepare(
-      `SELECT id, name, target_role, content, input_json, created_at, updated_at
-       FROM resumes WHERE user_id = ?
-       ORDER BY updated_at DESC`,
-    )
-    .all(req.auth.userId);
+  const { position_id } = req.query;
+  let sql = `SELECT id, name, target_role, content, input_json, position_id, created_at, updated_at
+       FROM resumes WHERE user_id = ?`;
+  const params = [req.auth.userId];
+  if (position_id) {
+    sql += ' AND position_id = ?';
+    params.push(position_id);
+  }
+  sql += ' ORDER BY updated_at DESC';
+  const rows = db.prepare(sql).all(...params);
   res.json({
     resumes: rows.map((r) => ({
       id: r.id,
@@ -26,6 +29,7 @@ router.get('/', (req, res) => {
       targetRole: r.target_role,
       content: r.content,
       input: r.input_json ? safeParse(r.input_json) : null,
+      positionId: r.position_id || null,
       createdAt: r.created_at,
       updatedAt: r.updated_at,
     })),
@@ -40,7 +44,7 @@ router.get('/:id', (req, res) => {
   const db = getDb();
   const row = db
     .prepare(
-      `SELECT id, name, target_role, content, input_json, created_at, updated_at
+      `SELECT id, name, target_role, content, input_json, position_id, created_at, updated_at
        FROM resumes WHERE id = ? AND user_id = ?`,
     )
     .get(req.params.id, req.auth.userId);
@@ -51,6 +55,7 @@ router.get('/:id', (req, res) => {
     targetRole: row.target_role,
     content: row.content,
     input: row.input_json ? safeParse(row.input_json) : null,
+    positionId: row.position_id || null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   });
@@ -62,7 +67,7 @@ router.get('/:id', (req, res) => {
  * body: { name, content, targetRole?, input? }
  */
 router.post('/', (req, res) => {
-  const { name, content, targetRole, input } = req.body || {};
+  const { name, content, targetRole, input, positionId } = req.body || {};
   // name 必填；content 可为空（用户可能还在填）
   if (!name || !String(name).trim()) {
     return res.status(400).json({ error: 'name 必填' });
@@ -70,8 +75,8 @@ router.post('/', (req, res) => {
   const id = crypto.randomUUID();
   const db = getDb();
   db.prepare(
-    `INSERT INTO resumes (id, user_id, name, target_role, content, input_json)
-     VALUES (?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO resumes (id, user_id, name, target_role, content, input_json, position_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     id,
     req.auth.userId,
@@ -79,6 +84,7 @@ router.post('/', (req, res) => {
     targetRole ? String(targetRole).slice(0, 80) : null,
     content ? String(content) : '',
     input ? JSON.stringify(input) : null,
+    positionId || null,
   );
   res.json({ id });
 });
@@ -88,29 +94,42 @@ router.post('/', (req, res) => {
  * PUT /api/resumes/:id
  */
 router.put('/:id', (req, res) => {
-  const { name, content, targetRole, input } = req.body || {};
+  const body = req.body || {};
   const db = getDb();
   const existing = db
     .prepare('SELECT id FROM resumes WHERE id = ? AND user_id = ?')
     .get(req.params.id, req.auth.userId);
   if (!existing) return res.status(404).json({ error: '简历不存在' });
 
-  db.prepare(
-    `UPDATE resumes
-     SET name = COALESCE(?, name),
-         target_role = COALESCE(?, target_role),
-         content = COALESCE(?, content),
-         input_json = COALESCE(?, input_json),
-         updated_at = datetime('now')
-     WHERE id = ? AND user_id = ?`,
-  ).run(
-    name ? String(name).slice(0, 80) : null,
-    targetRole ? String(targetRole).slice(0, 80) : null,
-    content ? String(content) : null,
-    input ? JSON.stringify(input) : null,
-    req.params.id,
-    req.auth.userId,
-  );
+  const assignments = [];
+  const values = [];
+  if (Object.hasOwn(body, 'name') && body.name) {
+    assignments.push('name = ?');
+    values.push(String(body.name).slice(0, 80));
+  }
+  if (Object.hasOwn(body, 'targetRole')) {
+    assignments.push('target_role = ?');
+    values.push(body.targetRole == null ? null : String(body.targetRole).slice(0, 80));
+  }
+  if (Object.hasOwn(body, 'content')) {
+    assignments.push('content = ?');
+    values.push(body.content == null ? '' : String(body.content));
+  }
+  if (Object.hasOwn(body, 'input')) {
+    assignments.push('input_json = ?');
+    values.push(body.input == null ? null : JSON.stringify(body.input));
+  }
+  if (Object.hasOwn(body, 'positionId')) {
+    assignments.push('position_id = ?');
+    values.push(body.positionId || null);
+  }
+  if (assignments.length > 0) {
+    assignments.push("updated_at = datetime('now')");
+    db.prepare(
+      `UPDATE resumes SET ${assignments.join(', ')}
+       WHERE id = ? AND user_id = ?`,
+    ).run(...values, req.params.id, req.auth.userId);
+  }
   res.json({ ok: true });
 });
 

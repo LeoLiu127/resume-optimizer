@@ -48,12 +48,22 @@ export function clearAuth() {
   setToken('', null);
 }
 
+export function notifyUnauthorized(windowLike = globalThis.window) {
+  if (!windowLike?.dispatchEvent) return;
+  const EventCtor = windowLike.CustomEvent || globalThis.CustomEvent;
+  const detail = { reason: 'unauthorized' };
+  const event = EventCtor
+    ? new EventCtor('resume:logout', { detail })
+    : { type: 'resume:logout', detail };
+  windowLike.dispatchEvent(event);
+}
+
 export function isAuthed() {
   return Boolean(getToken());
 }
 
 const API_BASE =
-  import.meta.env.VITE_API_BASE ||
+  import.meta.env?.VITE_API_BASE ||
   (typeof window !== 'undefined' ? `${window.location.protocol}//${window.location.hostname}:4000` : 'http://localhost:4000');
 
 async function request(path, { method = 'GET', body, auth = true, signal } = {}) {
@@ -94,6 +104,7 @@ async function request(path, { method = 'GET', body, auth = true, signal } = {})
     // 401 自动清登录态
     if (err.code === 'UNAUTHED') {
       clearAuth();
+      notifyUnauthorized();
     }
     throw err;
   }
@@ -155,8 +166,9 @@ export const auth = {
 /* ============ 简历库 ============ */
 
 export const resumes = {
-  list() {
-    return request('/api/resumes');
+  list(positionId) {
+    const q = positionId ? `?position_id=${encodeURIComponent(positionId)}` : '';
+    return request(`/api/resumes${q}`);
   },
   get(id) {
     return request(`/api/resumes/${encodeURIComponent(id)}`);
@@ -169,6 +181,46 @@ export const resumes = {
   },
   remove(id) {
     return request(`/api/resumes/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  },
+};
+
+/* ============ 目标岗位 ============ */
+
+export const positions = {
+  list() {
+    return request('/api/positions');
+  },
+  get(id) {
+    return request(`/api/positions/${encodeURIComponent(id)}`);
+  },
+  create(payload) {
+    return request('/api/positions', { method: 'POST', body: payload });
+  },
+  update(id, payload) {
+    return request(`/api/positions/${encodeURIComponent(id)}`, { method: 'PUT', body: payload });
+  },
+  remove(id) {
+    return request(`/api/positions/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  },
+  fromInput(input) {
+    return request('/api/positions/from-input', { method: 'POST', body: { input } });
+  },
+};
+
+/* ============ JD 链接提取 ============ */
+
+export const jd = {
+  extract(url) {
+    return request('/api/jd/extract', { method: 'POST', body: { url } });
+  },
+  translate({ title, jdContent }) {
+    return request('/api/jd/translate', {
+      method: 'POST',
+      body: { title, jdContent },
+    });
+  },
+  loginAssist(site) {
+    return request('/api/jd/login-assist', { method: 'POST', body: { site } });
   },
 };
 

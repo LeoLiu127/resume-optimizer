@@ -1,4 +1,4 @@
-import 'dotenv/config';
+import dotenv from 'dotenv';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import { existsSync } from 'node:fs';
@@ -12,7 +12,7 @@ function loadEnv() {
   if (!existsSync(envPath)) {
     return;
   }
-  // dotenv 已在 import 时自动加载，这里只做一个静默校验
+  dotenv.config({ path: envPath });
 }
 
 loadEnv();

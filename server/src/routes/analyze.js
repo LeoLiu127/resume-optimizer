@@ -12,92 +12,17 @@ import {
   buildEnhancementPrompt,
 } from '../../../src/services/prompts.js';
 import { buildMockAnalysis, exampleInput } from '../../../src/mockData.js';
+import { normalizeRewriteItems } from '../ai-response.js';
+import { extractJsonObject } from '../json-response.js';
+import { createMiniMaxClient } from '../minimax-client.js';
 
 const router = Router();
 router.use(requireAuth);
 
-const FALLBACK_ENABLED = (process.env.SERVER_FALLBACK_MOCK ?? 'true').toLowerCase() !== 'false';
+const minimaxClient = createMiniMaxClient(config.minimax);
 
-/**
- * 通用 MiniMax Chat Completions 客户端（服务端版本，保护 API Key）
- */
-async function chatCompletions(messages, options = {}) {
-  const { apiKey, baseUrl, model: defaultModel, timeout } = config.minimax;
-  if (!isMiniMaxConfigured()) {
-    throw new Error('服务端未配置 MiniMax API Key');
-  }
-  const payload = {
-    model: options.model || defaultModel,
-    messages,
-    temperature: options.temperature ?? 0.4,
-    max_tokens: options.maxTokens ?? 4096,
-    stream: false,
-  };
-  if (options.jsonMode) {
-    payload.response_format = { type: 'json_object' };
-  }
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeout);
-  let response;
-  try {
-    response = await fetch(`${baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify(payload),
-      signal: controller.signal,
-    });
-  } catch (err) {
-    clearTimeout(timer);
-    if (err.name === 'AbortError') {
-      throw new Error(`MiniMax 请求超时（${timeout}ms）`);
-    }
-    throw new Error(`MiniMax 网络异常：${err.message || err}`);
-  }
-  clearTimeout(timer);
-  if (!response.ok) {
-    let detail = '';
-    try {
-      const body = await response.json();
-      detail = body?.error?.message || body?.message || JSON.stringify(body);
-    } catch {
-      detail = await response.text().catch(() => '');
-    }
-    throw new Error(`MiniMax 请求失败（${response.status}）：${detail || response.statusText}`);
-  }
-  const data = await response.json();
-  const content = data?.choices?.[0]?.message?.content;
-  if (!content) throw new Error('MiniMax 返回内容为空');
-  return content;
-}
-
-function extractJson(text = '') {
-  if (!text) throw new Error('模型返回为空');
-  try {
-    return JSON.parse(text);
-  } catch {
-    /* try fallback */
-  }
-  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  if (fenced) {
-    try {
-      return JSON.parse(fenced[1].trim());
-    } catch {
-      /* continue */
-    }
-  }
-  const firstBrace = text.indexOf('{');
-  const lastBrace = text.lastIndexOf('}');
-  if (firstBrace !== -1 && lastBrace > firstBrace) {
-    try {
-      return JSON.parse(text.slice(firstBrace, lastBrace + 1));
-    } catch {
-      /* continue */
-    }
-  }
-  throw new Error('无法从模型输出中解析 JSON');
+function fallbackEnabled() {
+  return String(process.env.SERVER_FALLBACK_MOCK || '').toLowerCase() === 'true';
 }
 
 function safeMock(input, answers, requestId) {
@@ -116,31 +41,35 @@ function asyncRoute(handler) {
  * 响应: { engine, data, fallback? }
  */
 router.post(
-  '/analyze',
+  '/',
   asyncRoute(async (req, res) => {
     const { input, answers } = req.body || {};
     if (!input || typeof input !== 'object') {
       return res.status(400).json({ error: 'input 必填' });
     }
     if (!isMiniMaxConfigured()) {
-      if (FALLBACK_ENABLED) {
+      if (fallbackEnabled()) {
         return res.json({ engine: 'mock', data: safeMock(input, answers, 'analyze'), fallback: 'no-api-key' });
       }
       return res.status(503).json({ error: '服务端未配置 MiniMax API Key' });
     }
     try {
       const userPrompt = buildUserPrompt(input, answers || {});
-      const content = await chatCompletions(
+      const completion = await minimaxClient.complete(
         [
           { role: 'system', content: SYSTEM_PROMPT },
           { role: 'user', content: userPrompt },
         ],
-        { jsonMode: true, maxTokens: 6000 },
+        {
+          maxCompletionTokens: 32_768,
+          timeoutMs: Math.max(config.minimax.timeout, 180_000),
+        },
       );
-      const data = extractJson(content);
+      const data = extractJsonObject(completion.content);
       return res.json({ engine: 'minimax-m3', data });
     } catch (err) {
-      if (FALLBACK_ENABLED) {
+      console.error('[analyze:analyze] MiniMax 失败:', err.message);
+      if (fallbackEnabled()) {
         return res.json({ engine: 'mock', data: safeMock(input, answers, 'analyze'), fallback: 'api-error', error: err.message });
       }
       return res.status(502).json({ error: err.message || 'MiniMax 调用失败' });
@@ -154,14 +83,14 @@ router.post(
  * body: { input, askItem, userAnswer }
  */
 router.post(
-  '/analyze/followup',
+  '/followup',
   asyncRoute(async (req, res) => {
     const { input, askItem, userAnswer } = req.body || {};
     if (!askItem || !userAnswer) {
       return res.status(400).json({ error: 'askItem / userAnswer 必填' });
     }
     if (!isMiniMaxConfigured()) {
-      if (FALLBACK_ENABLED) {
+      if (fallbackEnabled()) {
         // 用模板拼一个 demo bullet，避免 demo 环境体验中断
         const bullet = `基于「${userAnswer.slice(0, 40)}${userAnswer.length > 40 ? '…' : ''}」，已转为“场景+动作+结果”的简历 bullet（需配置 API Key 后由 AI 完善）。`;
         return res.json({ engine: 'mock', bullet, fallback: 'no-api-key' });
@@ -170,14 +99,14 @@ router.post(
     }
     try {
       const prompt = buildFollowUpBulletPrompt(input || exampleInput, askItem.question, askItem.title, userAnswer);
-      const content = await chatCompletions(
+      const completion = await minimaxClient.complete(
         [
           { role: 'system', content: FOLLOW_UP_BULLET_SYSTEM },
           { role: 'user', content: prompt },
         ],
-        { temperature: 0.5, maxTokens: 800 },
+        { temperature: 0.5, maxCompletionTokens: 2_048 },
       );
-      return res.json({ engine: 'minimax-m3', bullet: content.trim() });
+      return res.json({ engine: 'minimax-m3', bullet: completion.content.trim() });
     } catch (err) {
       return res.status(502).json({ error: err.message || '追问生成失败' });
     }
@@ -190,14 +119,14 @@ router.post(
  * body: { input, items, style }
  */
 router.post(
-  '/analyze/rewrite',
+  '/rewrite',
   asyncRoute(async (req, res) => {
     const { input, items, style } = req.body || {};
     if (!Array.isArray(items) || !style) {
       return res.status(400).json({ error: 'items / style 必填' });
     }
     if (!isMiniMaxConfigured()) {
-      if (FALLBACK_ENABLED) {
+      if (fallbackEnabled()) {
         // 无 API Key 时返回原表，不变更体验
         return res.json({ engine: 'mock', items, fallback: 'no-api-key' });
       }
@@ -205,14 +134,17 @@ router.post(
     }
     try {
       const prompt = buildOptimizeStylePrompt(input || exampleInput, items, style);
-      const content = await chatCompletions(
+      const completion = await minimaxClient.complete(
         [
           { role: 'system', content: OPTIMIZE_STYLE_SYSTEM },
           { role: 'user', content: prompt },
         ],
-        { jsonMode: true, maxTokens: 4096 },
+        { maxCompletionTokens: 8_192 },
       );
-      return res.json({ engine: 'minimax-m3', items: extractJson(content) });
+      return res.json({
+        engine: 'minimax-m3',
+        items: normalizeRewriteItems(extractJsonObject(completion.content)),
+      });
     } catch (err) {
       return res.status(502).json({ error: err.message || '风格重写失败' });
     }
@@ -225,14 +157,14 @@ router.post(
  * body: { input, summary }
  */
 router.post(
-  '/analyze/enhance',
+  '/enhance',
   asyncRoute(async (req, res) => {
     const { input, summary } = req.body || {};
     if (!input || !summary) {
       return res.status(400).json({ error: 'input / summary 必填' });
     }
     if (!isMiniMaxConfigured()) {
-      if (FALLBACK_ENABLED) {
+      if (fallbackEnabled()) {
         // 简单占位补强建议，演示用
         return res.json({
           engine: 'mock',
@@ -250,14 +182,17 @@ router.post(
     }
     try {
       const prompt = buildEnhancementPrompt(input, summary);
-      const content = await chatCompletions(
+      const completion = await minimaxClient.complete(
         [
           { role: 'system', content: ENHANCEMENT_SYSTEM },
           { role: 'user', content: prompt },
         ],
-        { jsonMode: true, maxTokens: 4096 },
+        { maxCompletionTokens: 8_192 },
       );
-      return res.json({ engine: 'minimax-m3', enhancement: extractJson(content) });
+      return res.json({
+        engine: 'minimax-m3',
+        enhancement: extractJsonObject(completion.content),
+      });
     } catch (err) {
       return res.status(502).json({ error: err.message || '补强建议生成失败' });
     }

@@ -24,10 +24,27 @@ import { useResumes } from './hooks/useResumes';
 import { usePersistentAnswers } from './hooks/usePersistentAnswers';
 import { parseFile } from './services/fileParser';
 import { STYLE_LABELS } from './services/prompts';
+import {
+  isExactExampleInput,
+  resumeRecordToEditorState,
+  shouldAutoSaveDraft,
+} from './services/resumeDraft';
+import {
+  buildPositionPayload,
+  mergeBilingualTranslationIntoInput,
+  mergeJdExtractionIntoInput,
+} from './services/jdFieldMapping';
+import { needsBilingualTranslation } from './services/bilingualJd';
+import {
+  canUseAnalysis,
+  createAnalysisContextKey,
+  isAnalysisCurrent,
+} from './services/analysisContext';
 import { ExportPanel } from './components/ExportPanel';
 import { AuthGate } from './components/AuthGate';
 import { AdminPanel } from './components/AdminPanel';
-import { getStoredUser } from './services/api';
+import { PositionPanel } from './components/PositionPanel';
+import { getStoredUser, positions as positionsApi, jd as jdApi } from './services/api';
 
 const THEMES = [
   { key: 'light', label: '白', dot: '#ffffff' },
@@ -44,7 +61,7 @@ const STEP_STATUS = {
 };
 
 const COMPANY_TYPE_OPTIONS = [
-  { value: '', label: '不限' },
+  { value: '', label: '未填写' },
   { value: 'ToB SaaS公司', label: 'ToB SaaS 公司' },
   { value: 'AI创业公司', label: 'AI 创业公司' },
   { value: '互联网大厂', label: '互联网大厂' },
@@ -54,7 +71,7 @@ const COMPANY_TYPE_OPTIONS = [
 ];
 
 const JOB_STAGE_OPTIONS = [
-  { value: '', label: '不限' },
+  { value: '', label: '未填写' },
   { value: '校招', label: '应届毕业生 / 校招' },
   { value: '社招-1-3年', label: '1-3 年经验' },
   { value: '社招-3-5年', label: '3-5 年经验' },
@@ -111,29 +128,55 @@ function App() {
   // 复制 / Dialog 状态
   const [copied, setCopied] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
+  // 当前登录用户（用于数据隔离与管理后台入口）
+  const [currentUser, setCurrentUser] = useState(() => getStoredUser());
   // 简历库（云端）
-  const resumes = useResumes();
+  const resumes = useResumes(currentUser?.id || '');
   // 当前编辑中的简历名称（重命名 / 新建用）
   const [resumeTitle, setResumeTitle] = useState('');
   // 防抖加载远端列表，避免刷新闪烁
   const [resumeListLoaded, setResumeListLoaded] = useState(false);
-  // 当前登录用户（用于判断是否显示管理后台入口）
-  const [currentUser, setCurrentUser] = useState(() => getStoredUser());
   // 管理后台视图开关（仅 admin 可见入口）
   const [adminView, setAdminView] = useState(false);
+  // 岗位管理面板开关
+  const [positionView, setPositionView] = useState(false);
+  // 当前绑定的岗位 ID
+  const [boundPositionId, setBoundPositionId] = useState('');
+  const [boundPositionTitle, setBoundPositionTitle] = useState('');
+  // URL 提取状态
+  const [jdUrl, setJdUrl] = useState('');
+  const [extracting, setExtracting] = useState(false);
+  const [extractResult, setExtractResult] = useState(null);
+  const [loginAssistMsg, setLoginAssistMsg] = useState('');
+  const [preparingAnalysis, setPreparingAnalysis] = useState(false);
+  const [translationWarning, setTranslationWarning] = useState('');
 
   // 经历追问记忆（持久化回答 + AI bullet + 跨 JD 记忆库）
   const {
     answers,
     setAnswer,
+    saveToMemory,
+    isInMemory,
     followUpBullets,
     saveBullet,
     mergeWithMemory,
     newItemIds,
-    clearAll: clearAnswerMemory,
     clearCurrent: clearCurrentAnswers,
+    ensureContext: ensureAnswerContext,
     memoryCount,
   } = usePersistentAnswers(currentUser?.id || '');
+  const [savedTip, setSavedTip] = useState('');
+
+  const invalidateAnalysisContext = ({ clearTransientAnswers = true } = {}) => {
+    reset();
+    setAnalyzedInput(null);
+    setAnalysisStarted(false);
+    setRewriteOverride(null);
+    setBulletError('');
+    setRewriteError('');
+    setTranslationWarning('');
+    if (clearTransientAnswers) clearCurrentAnswers();
+  };
 
   // 分析完成后，将新追问与记忆库合并（自动预填充已回答过的问题）
   const prevAskItemsRef = useRef(null);
@@ -159,19 +202,86 @@ function App() {
 
   // 登出时重置 adminView
   useEffect(() => {
-    if (!currentUser) setAdminView(false);
+    if (!currentUser) {
+      setAdminView(false);
+      setPositionView(false);
+    }
   }, [currentUser]);
+
+  // 岗位面板：应用岗位到输入表单
+  const handleApplyPosition = (positionInput, positionId, positionTitle) => {
+    invalidateAnalysisContext();
+    setInput((prev) => ({
+      ...prev,
+      ...positionInput,
+      resume: prev.resume, // 保留已有简历内容
+    }));
+    setBoundPositionId(positionId || '');
+    setBoundPositionTitle(positionTitle || '');
+    setPositionView(false);
+    setActiveStep(0);
+  };
+
+  // 解除岗位绑定
+  const handleUnbindPosition = () => {
+    setBoundPositionId('');
+    setBoundPositionTitle('');
+  };
+
+  // URL 提取 JD
+  const handleExtractJd = async () => {
+    if (!jdUrl.trim() || extracting) return;
+    setExtracting(true);
+    setExtractResult(null);
+    setLoginAssistMsg('');
+    try {
+      const result = await jdApi.extract(jdUrl.trim());
+      setExtractResult(result);
+      if (result.success) {
+        invalidateAnalysisContext();
+        // 本次提取是派生字段的唯一来源；未提取到时清空，避免残留上一岗位的数据。
+        setInput((prev) => mergeJdExtractionIntoInput(prev, result));
+        // 异步保存为岗位，不阻塞 UI
+        handleSaveAsPosition(result);
+      }
+    } catch (err) {
+      setExtractResult({ success: false, message: err.message || '提取失败' });
+    } finally {
+      setExtracting(false);
+    }
+  };
+
+  // 把当前输入或提取结果保存为岗位
+  const handleSaveAsPosition = async (extractedData) => {
+    const payload = buildPositionPayload({
+      input,
+      extractedData,
+      jdUrl,
+      sourceSite: detectSite(jdUrl),
+    });
+    try {
+      const created = await positionsApi.create(payload);
+      const newId = created.id;
+      setBoundPositionId(newId);
+      setBoundPositionTitle(payload.title);
+    } catch (err) {
+      console.error('保存岗位失败:', err);
+    }
+  };
+
+  // 辅助登录
+  const handleLoginAssist = async () => {
+    try {
+      const res = await jdApi.loginAssist(detectSite(jdUrl));
+      setLoginAssistMsg(res.message || '浏览器已打开');
+    } catch (err) {
+      setLoginAssistMsg(`登录辅助失败：${err.message}`);
+    }
+  };
 
   // 派生状态：输入是否完全是示例数据
   const inputIsExample =
-    input.targetRole === exampleInput.targetRole &&
-    input.targetIndustry === exampleInput.targetIndustry &&
-    input.targetCompanyType === exampleInput.targetCompanyType &&
-    input.jobStage === exampleInput.jobStage &&
-    input.highlightSkills === exampleInput.highlightSkills &&
-    input.jd === exampleInput.jd &&
-    input.resume === exampleInput.resume &&
-    input.extras === exampleInput.extras;
+    isExactExampleInput(input, exampleInput);
 
   const inputHasContent =
     Boolean(
@@ -186,75 +296,69 @@ function App() {
     );
 
   // 当前输入是否与生成分析时一致
-  const inputMatchesAnalyzed = (() => {
-    if (!analyzedInput) return false;
-    return (
-      input.targetRole === analyzedInput.targetRole &&
-      input.targetIndustry === analyzedInput.targetIndustry &&
-      input.targetCompanyType === analyzedInput.targetCompanyType &&
-      input.jobStage === analyzedInput.jobStage &&
-      input.highlightSkills === analyzedInput.highlightSkills &&
-      input.jd === analyzedInput.jd &&
-      input.resume === analyzedInput.resume &&
-      input.extras === analyzedInput.extras
-    );
-  })();
+  const inputMatchesAnalyzed = isAnalysisCurrent(input, analyzedInput);
+  const analysisIsCurrent = canUseAnalysis(analysis, input, analyzedInput);
 
-  // 初始加载简历列表（页面刷新后自动恢复）
+  // 登录用户变化后加载对应简历列表与用户级本地草稿
   useEffect(() => {
+    if (!currentUser?.id) {
+      setResumeListLoaded(false);
+      return undefined;
+    }
     let cancelled = false;
     (async () => {
       try {
         await resumes.refresh();
         if (cancelled) return;
         setResumeListLoaded(true);
-        // 优先用 hook 已恢复的 activeId；其次用 localStorage 中的本地草稿
-        const restoredId = resumes.activeId || (resumes.readLocalDraft()?.id || '');
+        const draft = resumes.readLocalDraft();
+        const restoredId = resumes.readActiveId() || draft?.id || '';
         if (restoredId) {
           try {
             const remote = await resumes.loadResume(restoredId);
-            if (!cancelled && remote && (remote.input || remote.content)) {
-              setInput(remote.input || {
-                targetRole: remote.targetRole || '',
-                targetIndustry: '',
-                targetCompanyType: '',
-                jobStage: '',
-                highlightSkills: '',
-                jd: '',
-                resume: remote.content || '',
-                extras: '',
-              });
-              setResumeTitle(remote.name || '');
+            if (!cancelled && remote) {
+              const restored = resumeRecordToEditorState(remote);
+              setInput(restored.input);
+              setResumeTitle(restored.title);
+              setBoundPositionId(restored.positionId);
+              setBoundPositionTitle(restored.positionTitle);
             }
           } catch {
-            /* 后端无此 id 时忽略，保持空状态 */
+            // 服务端恢复失败，回退到本地草稿
+            if (!cancelled && draft?.input) {
+              setInput(draft.input);
+              setResumeTitle(draft.name || '');
+              setBoundPositionId(draft.positionId || '');
+              setBoundPositionTitle(draft.positionId ? draft.input.targetRole || '当前岗位' : '');
+            }
+          }
+        } else {
+          // 无 activeId 但有当前用户的本地草稿
+          if (!cancelled && draft?.input) {
+            setInput(draft.input);
+            setResumeTitle(draft.name || '');
+            setBoundPositionId(draft.positionId || '');
+            setBoundPositionTitle(draft.positionId ? draft.input.targetRole || '当前岗位' : '');
           }
         }
       } catch {
-        /* 未登录或后端不可达，保持本地草稿即可 */
+        // 未登录或后端不可达，尝试本地草稿
+        const draft = resumes.readLocalDraft();
+        if (!cancelled && draft?.input) {
+          setInput(draft.input);
+          setResumeTitle(draft.name || '');
+          setBoundPositionId(draft.positionId || '');
+          setBoundPositionTitle(draft.positionId ? draft.input.targetRole || '当前岗位' : '');
+        }
+        setResumeListLoaded(true);
       }
     })();
     return () => {
       cancelled = true;
     };
-    // 仅初次加载
+    // 数据访问函数由 userId 派生；只在登录用户变化时恢复
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // 监听登录事件，登录后再补一次简历列表刷新
-  useEffect(() => {
-    const onLogin = async () => {
-      try {
-        await resumes.refresh();
-        setResumeListLoaded(true);
-      } catch (err) {
-        /* 错误由 hook 内部记录 */
-      }
-    };
-    window.addEventListener('resume:login', onLogin);
-    return () => window.removeEventListener('resume:login', onLogin);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [currentUser?.id]);
 
   // 监听登出事件（来自 AuthGate）
   useEffect(() => {
@@ -274,21 +378,17 @@ function App() {
       setResumeListLoaded(false);
       reset();
       setAnalyzedInput(null);
-      clearAnswerMemory();
+      clearCurrentAnswers();
       setAnalysisStarted(false);
       setActiveStep(0);
     };
     window.addEventListener('resume:logout', onLogout);
     return () => window.removeEventListener('resume:logout', onLogout);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [clearCurrentAnswers, reset, resumes.clearLocal]);
 
   // input 变化时自动保存到当前简历（防抖在 hook 内）
   useEffect(() => {
-    if (!resumeListLoaded) return;
-    if (!input.resume && !input.jd && !input.targetRole && !input.highlightSkills && !input.extras) {
-      return;
-    }
+    if (!shouldAutoSaveDraft(input, exampleInput, resumeListLoaded)) return;
     const targetRole = input.targetRole || '未命名目标';
     const name = resumeTitle || targetRole;
     resumes.scheduleAutoSave({
@@ -297,9 +397,10 @@ function App() {
       content: input.resume,
       targetRole,
       input,
+      positionId: boundPositionId || null,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [input, resumeTitle]);
+  }, [input, resumeTitle, boundPositionId]);
 
   const handleUseExample = () => {
     if (analysisStarted) {
@@ -308,27 +409,18 @@ function App() {
       );
       if (!ok) return;
     }
-    reset();
+    resumes.beginEditingSession();
+    invalidateAnalysisContext();
     setInput(exampleInput);
-    setAnalysisStarted(false);
     setActiveStep(0);
-    clearCurrentAnswers();
     setVariant('balanced');
-    setAnalyzedInput(null);
-    setRewriteOverride(null);
-    setBulletError('');
-    setRewriteError('');
     setCopied(false);
     setDialogOpen(false);
-    // 示例数据不写入简历库：立即清掉 pending + 切走 activeId
-    if (resumes.flushAutoSave) resumes.flushAutoSave().catch(() => {});
-    if (resumes.setActiveId) resumes.setActiveId('');
+    setBoundPositionId('');
+    setBoundPositionTitle('');
+    // 旧草稿后台落盘，但迟到请求不能重新激活当前简历
+    resumes.setActiveId('');
     setResumeTitle('');
-    try {
-      localStorage.removeItem('resume.draft.activeId');
-    } catch {
-      /* ignore */
-    }
   };
 
   const handleClearInput = () => {
@@ -344,10 +436,12 @@ function App() {
     if (!hasContent) return;
     const ok = window.confirm(
       analysisStarted
-        ? '清空表单仅重置输入框，不会清空已生成的分析结果与追问回答。确定继续吗？'
+        ? '清空表单会同时清除当前分析结果和临时追问回答，但不会删除长期追问记忆。确定继续吗？'
         : '确定清空所有输入框？',
     );
     if (!ok) return;
+    resumes.beginEditingSession();
+    invalidateAnalysisContext();
     setInput({
       targetRole: '',
       targetIndustry: '',
@@ -360,15 +454,11 @@ function App() {
     });
     setResumeTitle('');
     // 切换为空草稿，让自动保存创建一条新简历
-    if (resumes.setActiveId) resumes.setActiveId('');
-    try {
-      localStorage.removeItem('resume.draft.activeId');
-    } catch {
-      /* ignore */
-    }
+    resumes.setActiveId('');
   };
 
   const handleSelectResume = async (id) => {
+    resumes.beginEditingSession();
     if (!id) {
       // 新建空草稿
       setResumeTitle('');
@@ -382,37 +472,22 @@ function App() {
         resume: '',
         extras: '',
       });
-      if (resumes.setActiveId) resumes.setActiveId('');
-      try {
-        localStorage.removeItem('resume.draft.activeId');
-      } catch {
-        /* ignore */
-      }
-      reset();
-      setAnalyzedInput(null);
-      clearCurrentAnswers();
-      setAnalysisStarted(false);
+      resumes.setActiveId('');
+      setBoundPositionId('');
+      setBoundPositionTitle('');
+      invalidateAnalysisContext();
       setActiveStep(0);
       return;
     }
     try {
       const remote = await resumes.loadResume(id);
-      if (remote && remote.resume) {
-        setInput(remote.input || {
-          targetRole: remote.targetRole || '',
-          targetIndustry: '',
-          targetCompanyType: '',
-          jobStage: '',
-          highlightSkills: '',
-          jd: '',
-          resume: remote.content || '',
-          extras: '',
-        });
-        setResumeTitle(remote.name || '');
-        reset();
-        setAnalyzedInput(null);
-        clearCurrentAnswers();
-        setAnalysisStarted(false);
+      if (remote) {
+        const restored = resumeRecordToEditorState(remote);
+        setInput(restored.input);
+        setResumeTitle(restored.title);
+        setBoundPositionId(restored.positionId);
+        setBoundPositionTitle(restored.positionTitle);
+        invalidateAnalysisContext();
         setActiveStep(0);
       }
     } catch (err) {
@@ -429,8 +504,10 @@ function App() {
     const ok = window.confirm('确认删除该简历？此操作不可恢复。');
     if (!ok) return;
     try {
+      const deletingActiveResume = resumes.activeId === id;
+      if (deletingActiveResume) await resumes.beginEditingSession();
       await resumes.removeResume(id);
-      if (resumes.activeId === id) {
+      if (deletingActiveResume) {
         setResumeTitle('');
         setInput({
           targetRole: '',
@@ -442,6 +519,10 @@ function App() {
           resume: '',
           extras: '',
         });
+        setBoundPositionId('');
+        setBoundPositionTitle('');
+        invalidateAnalysisContext();
+        setActiveStep(0);
       }
     } catch (err) {
       alert(err.message || '删除失败');
@@ -466,21 +547,63 @@ function App() {
     e.target.value = '';
   };
 
- const handleAnalyze = async () => {
-    if (loading) return;
+  const handleAnalyze = async () => {
+    if (loading || preparingAnalysis) return;
     if (!input.resume.trim() && !input.jd.trim()) {
       alert('请至少填写"目标岗位JD"或"原始简历"后再开始分析');
       return;
     }
+    reset();
+    setAnalyzedInput(null);
     setAnalysisStarted(true);
     setActiveStep(1);
-    setAnalyzedInput({ ...input }); // 记录生成分析时的输入快照
     setRewriteOverride(null);
-    await analyze(input, answers);
+    setPreparingAnalysis(true);
+    setTranslationWarning('');
+    let analysisInput = input;
+    try {
+      if (needsBilingualTranslation(input.targetRole, input.jd)) {
+        try {
+          const translation = await jdApi.translate({
+            title: input.targetRole,
+            jdContent: input.jd,
+          });
+          analysisInput = mergeBilingualTranslationIntoInput(input, translation);
+          setInput(analysisInput);
+          if (needsBilingualTranslation(analysisInput.targetRole, analysisInput.jd)) {
+            setTranslationWarning(
+              `中英双语转换未完成：${translation.reason || '模型未返回有效中文译文'}`,
+            );
+          }
+        } catch (error) {
+          setTranslationWarning(`中英双语转换失败：${error.message || '未知错误'}`);
+        }
+      }
+      const answerContextChanged = ensureAnswerContext(
+        createAnalysisContextKey(
+          analysisInput,
+          resumes.activeId || '',
+          boundPositionId || '',
+        ),
+      );
+      const result = await analyze(
+        analysisInput,
+        answerContextChanged ? {} : answers,
+      );
+      if (result) {
+        setAnalyzedInput({ ...analysisInput });
+      }
+    } finally {
+      setPreparingAnalysis(false);
+    }
   };
 
   // 追问 AI 生成专业 bullet
   const handleGenerateBullet = async (askItem) => {
+    if (!analysisIsCurrent) {
+      setBulletError('当前输入已变化，请先重新解析后再生成追问表达。');
+      return;
+    }
     const userAnswer = answers[askItem.id] || '';
     if (!userAnswer.trim()) {
       setBulletError(`请先填写【${askItem.title}】的回答`);
@@ -498,9 +621,23 @@ function App() {
     }
   };
 
+  // 手动保存追问回答到记忆库
+  const handleSaveMemory = (askItem) => {
+    const ok = saveToMemory(askItem);
+    if (ok) {
+      setSavedTip(`【${askItem.title}】已保存到记忆`);
+      setTimeout(() => setSavedTip(''), 2000);
+    }
+  };
+
   // 优化风格切换：仅在 minimax 引擎下重新生成
   const handleVariantChange = async (nextVariant) => {
     setVariant(nextVariant);
+    if (!analysisIsCurrent) {
+      setRewriteOverride(null);
+      setRewriteError('当前输入已变化，请先重新解析后再切换优化风格。');
+      return;
+    }
     if (engine !== 'minimax-m3' || !analysis) {
       setRewriteOverride(null);
       return;
@@ -524,7 +661,7 @@ function App() {
   };
 
   const handleCopyResume = async () => {
-    if (!analysis) {
+    if (!analysisIsCurrent) {
       alert('请先生成分析结果后再复制');
       return;
     }
@@ -547,8 +684,8 @@ function App() {
   // 步骤状态：input 始终可点；其余步骤未生成分析时禁用
   const getStepStatus = (index) => {
     if (index === 0) return activeStep === 0 ? STEP_STATUS.ACTIVE : STEP_STATUS.COMPLETED;
-    if (!analysis && !analysisStarted) return STEP_STATUS.PENDING;
-    if (!analysis) return STEP_STATUS.DISABLED;
+    if (!analysisIsCurrent && !analysisStarted) return STEP_STATUS.PENDING;
+    if (!analysisIsCurrent) return STEP_STATUS.DISABLED;
     if (index < activeStep) return STEP_STATUS.COMPLETED;
     if (index === activeStep) return STEP_STATUS.ACTIVE;
     return STEP_STATUS.PENDING;
@@ -556,7 +693,7 @@ function App() {
 
   const canNavigateTo = (index) => {
     if (index === 0) return true;
-    return Boolean(analysis);
+    return analysisIsCurrent;
   };
 
   const handleStepNav = (index) => {
@@ -566,16 +703,20 @@ function App() {
 
   const renderStepContent = () => {
     if (!analysisStarted && activeStep !== 0) {
-      return <EmptyState title="请先开始分析" description="先填写信息或使用示例数据，然后点击“开始分析”。" />;
+      return <EmptyState title="请先开始分析" description="先填写信息或使用示例数据，然后点击“岗位解析”。" />;
     }
 
-    if (loading && !analysis && activeStep !== 0) {
+    if ((loading || preparingAnalysis) && !analysis && activeStep !== 0) {
       return (
         <section className="panel-stack">
           <div className="card loading-state">
             <div className="loading-spinner" aria-hidden="true" />
-            <h3>正在调用 MiniMax 生成分析…</h3>
-            <p className="muted">预计需要 10–30 秒，生成期间你可以继续浏览其他面板。</p>
+            <h3>
+              {preparingAnalysis && !loading
+                ? '正在生成中英双语 JD…'
+                : '正在调用 MiniMax 生成分析…'}
+            </h3>
+            <p className="muted">复杂简历预计需要 30–120 秒，请勿重复点击。</p>
           </div>
         </section>
       );
@@ -613,7 +754,7 @@ function App() {
                       {resumes.list.map((r) => (
                         <option key={r.id} value={r.id}>
                           {r.name} · {r.targetRole || '未设目标'}
-                          {r.updated_at ? ` · ${new Date(r.updated_at).toLocaleString('zh-CN', { hour12: false })}` : ''}
+                          {r.updatedAt ? ` · ${new Date(r.updatedAt).toLocaleString('zh-CN', { hour12: false })}` : ''}
                         </option>
                       ))}
                     </select>
@@ -657,10 +798,74 @@ function App() {
                         : '尚未保存任何简历 · 填写后会自动创建一条'}
                     </span>
                   )}
+                  <button
+                    type="button"
+                    className="link-btn"
+                    style={{ marginLeft: 'auto' }}
+                    disabled={!input.targetRole && !input.jd}
+                    onClick={() => handleSaveAsPosition()}
+                    title="把当前输入保存为目标岗位"
+                  >
+                    + 保存为岗位
+                  </button>
                 </div>
               </div>
             </Card>
             <section className="panel-grid input-grid">
+              {/* 目标岗位卡片：URL 提取 + 绑定提示 */}
+              <div className="card position-input-card" style={{ gridColumn: '1 / -1' }}>
+                <div className="card-title">🎯 目标岗位</div>
+                {boundPositionId ? (
+                  <div className="bound-position-row">
+                    <div className="bound-info">
+                      <span className="bound-label">已绑定：</span>
+                      <strong>{boundPositionTitle || '当前岗位'}</strong>
+                      <span className="muted" style={{ marginLeft: 8 }}>本份简历将自动关联到该岗位</span>
+                    </div>
+                    <button className="link-btn" onClick={handleUnbindPosition}>解除绑定</button>
+                  </div>
+                ) : (
+                  <>
+                    <p className="muted" style={{ fontSize: 12, marginBottom: 10 }}>
+                      粘贴招聘链接，自动提取 JD 并保存为岗位。也可手动填写下方表单后点「保存为岗位」。
+                    </p>
+                    <div className="jd-extract-row">
+                      <input
+                        type="url"
+                        className="jd-url-input"
+                        placeholder="粘贴 Boss直聘 / 拉勾 / 猎聘 等招聘链接"
+                        value={jdUrl}
+                        onChange={(e) => { setJdUrl(e.target.value); setExtractResult(null); }}
+                        onKeyDown={(e) => { if (e.key === 'Enter') handleExtractJd(); }}
+                      />
+                      <button
+                        className="primary-button small"
+                        onClick={handleExtractJd}
+                        disabled={extracting || !jdUrl.trim()}
+                      >
+                        {extracting ? '⏳ 提取中…' : '提取 JD'}
+                      </button>
+                    </div>
+                    {extractResult && !extractResult.success && (
+                      <div className="jd-extract-fail">
+                        <span>{extractResult.message}</span>
+                        <button className="link-btn" onClick={handleLoginAssist}>
+                          需要登录？点击辅助登录
+                        </button>
+                      </div>
+                    )}
+                    {extractResult && extractResult.success && (
+                      <div className="jd-extract-success">✅ 已提取并保存为岗位，下方表单已自动填充</div>
+                    )}
+                    {loginAssistMsg && (
+                      <div className="jd-extract-fail" style={{ color: 'var(--text-secondary)' }}>
+                        {loginAssistMsg}
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+
               <Card title="求职目标">
               <Field label="目标岗位" value={input.targetRole} onChange={(value) => setInput({ ...input, targetRole: value })} placeholder="例如：AI产品经理" />
               <Field label="目标行业" value={input.targetIndustry} onChange={(value) => setInput({ ...input, targetIndustry: value })} placeholder="例如：AI应用 / 企业服务" />
@@ -711,8 +916,12 @@ function App() {
           <section className="panel-stack">
             <HeaderBlock title="JD解析" subtitle="基于目标岗位输出职责、要求、关键词与理想候选人画像。" />
             <DataTable
+              wideFirstCol
               columns={['分析维度', '解析结果']}
-              rows={analysis.jdAnalysis.map((item) => [item.item, item.detail])}
+              rows={analysis.jdAnalysis.map((item) => [
+                <strong key="dim">{item.item}</strong>,
+                <span key="detail" className="jd-detail">{formatJdDetail(item.detail)}</span>,
+              ])}
             />
           </section>
         );
@@ -736,14 +945,17 @@ function App() {
             </div>
             <Card title="维度评分">
               <div className="score-list">
-                {analysis.diagnosis.dimensions.map((item) => (
+                {[...analysis.diagnosis.dimensions].sort((a, b) => a.score - b.score).map((item) => (
                   <div className="score-item" key={item.name}>
                     <div className="score-head">
                       <span>{item.name}</span>
-                      <strong>{item.score}</strong>
+                      <strong className={item.score < 70 ? 'score-low' : item.score < 80 ? 'score-mid' : 'score-high'}>{item.score}</strong>
                     </div>
                     <div className="progress-track">
-                      <div className="progress-fill" style={{ width: `${item.score}%` }} />
+                      <div
+                        className={`progress-fill ${item.score < 70 ? 'fill-low' : item.score < 80 ? 'fill-mid' : 'fill-high'}`}
+                        style={{ width: `${item.score}%` }}
+                      />
                     </div>
                     {item.comment ? <p className="score-comment">{item.comment}</p> : null}
                   </div>
@@ -775,7 +987,7 @@ function App() {
           <section className="panel-stack">
             <HeaderBlock
               title="经历追问"
-              subtitle="这些问题决定你能否把经历改成可信的能力证据。回答会自动记忆，切换 JD 后无需重复填写。"
+              subtitle="这些问题决定你能否把经历改成可信的能力证据。点击「保存记忆」后，切换 JD 无需重复填写。"
               right={memoryCount > 0 ? (
                 <span className="status-hint" style={{ alignSelf: 'center' }}>
                   📝 已记忆 {memoryCount} 条回答
@@ -787,19 +999,26 @@ function App() {
                 <p style={{ margin: 0 }}>{bulletError}</p>
               </div>
             ) : null}
+            {savedTip ? (
+              <div className="note-card" style={{ padding: '10px 14px' }}>✅ {savedTip}</div>
+            ) : null}
+            <div className="note-card" style={{ padding: '10px 14px', fontSize: 12 }}>
+              💡 填写回答后点击顶部「重新解析」按钮，即可将补充信息融入最终简历优化结果。
+            </div>
             <div className="ask-grid">
               {analysis.askItems.map((item) => {
                 const aiBullet = followUpBullets[item.id];
                 const isLoadingBullet = bulletLoadingId === item.id;
                 const isNew = newItemIds.has(item.id);
                 const hasAnswer = (answers[item.id] || '').trim();
+                const remembered = isInMemory(item);
                 return (
                   <Card key={item.id} title={item.title} compact>
                     <div className="ask-item-header">
                       <p className="muted">{item.question}</p>
                       {isNew ? (
                         <span className="badge badge-new">新增追问</span>
-                      ) : hasAnswer ? (
+                      ) : remembered ? (
                         <span className="badge badge-remembered">已记忆</span>
                       ) : null}
                     </div>
@@ -829,11 +1048,15 @@ function App() {
                           </>
                         )}
                       </button>
-                      {hasAnswer ? (
-                        <span className="status-hint">已填写 · 可生成</span>
-                      ) : (
-                        <span className="status-hint">待填写</span>
-                      )}
+                      <button
+                        type="button"
+                        className="followup-action-btn"
+                        onClick={() => handleSaveMemory(item)}
+                        disabled={!hasAnswer}
+                        title="保存回答到记忆，下次分析新 JD 时自动预填"
+                      >
+                        {remembered ? '更新记忆' : '保存记忆'}
+                      </button>
                     </div>
                     {aiBullet ? (
                       <div className="bullet-ai-result">
@@ -870,7 +1093,6 @@ function App() {
                 ['concise', '更简洁'],
                 ['conservative', '降低夸张'],
                 ['ai', '更偏AI产品'],
-                ['tob', '更偏ToB SaaS'],
               ].map(([key, label]) => (
                 <button
                   key={key}
@@ -899,6 +1121,7 @@ function App() {
               </div>
             ) : null}
             <DataTable
+              tableClass="rewrite-table"
               columns={['板块', '修改前', '修改后', '修改理由', '风险提示']}
               rows={rewriteTable.map((item) => [
                 <span key="section" className="section-badge">{item.section || '其他'}</span>,
@@ -916,7 +1139,7 @@ function App() {
             <HeaderBlock title="面试准备" subtitle="把简历里的潜在风险，提前变成可准备的回答。" />
             <div className="two-column">
               <Card title="高频追问">
-                <BulletList items={analysis.interviewPrep.questions} />
+                <QuestionList items={analysis.interviewPrep.questions} />
               </Card>
               <Card title="需要准备的证据">
                 <BulletList items={analysis.interviewPrep.proofs} />
@@ -1037,6 +1260,45 @@ function App() {
             currentUser={currentUser}
             onBack={() => setAdminView(false)}
           />
+        ) : positionView ? (
+          <div className="position-view-wrapper">
+            <PositionPanel
+              onApplyPosition={handleApplyPosition}
+              onBack={() => setPositionView(false)}
+              onOpenResume={async (resumeId) => {
+                try {
+                  resumes.beginEditingSession();
+                  const remote = await resumes.loadResume(resumeId);
+                  if (remote) {
+                    setInput(remote.input || {
+                      targetRole: remote.targetRole || '',
+                      targetIndustry: '',
+                      targetCompanyType: '',
+                      jobStage: '',
+                      highlightSkills: '',
+                      jd: '',
+                      resume: remote.content || '',
+                      extras: '',
+                    });
+                    setResumeTitle(remote.name || '');
+                    setBoundPositionId(remote.positionId || '');
+                    if (remote.positionId) {
+                      try {
+                        const pos = await positionsApi.get(remote.positionId);
+                        setBoundPositionTitle(pos.title || '');
+                      } catch { /* ignore */ }
+                    }
+                    invalidateAnalysisContext();
+                    setPositionView(false);
+                    setActiveStep(0);
+                  }
+                } catch (err) {
+                  alert(err.message || '加载简历失败');
+                }
+              }}
+              currentUser={currentUser}
+            />
+          </div>
         ) : (
           <>
             <header className="topbar">
@@ -1058,19 +1320,31 @@ function App() {
               </button>
             ))}
           </div>
-          <button className="secondary-button" onClick={handleUseExample} disabled={loading}>使用示例数据</button>
-          <button className="secondary-button" onClick={handleClearInput} disabled={loading}>清空表单</button>
-          <button className="primary-button" onClick={handleAnalyze} disabled={loading}>
-            {loading ? '分析中…' : analysisStarted ? '重新生成' : '开始分析'}
+          <button className="secondary-button small" onClick={handleUseExample} disabled={loading}>使用示例数据</button>
+          <button className="secondary-button small" onClick={handleClearInput} disabled={loading}>清空表单</button>
+          <button
+            className={`secondary-button small ${positionView ? 'active' : ''}`}
+            onClick={() => { setPositionView((v) => !v); setAdminView(false); }}
+            title="目标岗位管理"
+          >
+            <Target size={12} /> {positionView ? '返回' : '岗位'}
           </button>
           {currentUser && currentUser.role === 'admin' ? (
             <button
-              className={`secondary-button ${adminView ? 'active' : ''}`}
+              className={`secondary-button small ${adminView ? 'active' : ''}`}
               onClick={() => setAdminView((v) => !v)}
               title={adminView ? '返回工作区' : '进入管理后台'}
             >
-              <Shield size={14} /> {adminView ? '返回工作区' : '管理后台'}
+              <Shield size={12} /> {adminView ? '返回' : '管理'}
             </button>
+          ) : null}
+        </div>
+        <div className="topbar-main-action">
+          <button className="primary-button" onClick={handleAnalyze} disabled={loading || preparingAnalysis}>
+            {loading || preparingAnalysis ? '解析中…' : activeStep === 0 ? '岗位解析' : '重新解析'}
+          </button>
+          {activeStep !== 0 && analysisStarted ? (
+            <span className="main-action-hint">更新输入或追问回答后，点击重新解析刷新全部结果</span>
           ) : null}
         </div>
       </header>
@@ -1102,27 +1376,26 @@ function App() {
           </div>
           <Card title="当前状态" compact>
             <div className="status-list">
-              <div><span>产品定位</span><strong>JD定制优化</strong></div>
-              <div><span>分析引擎</span><strong>{engineLabel(engine)}</strong></div>
-              <div><span>适配方向</span><strong>{input.targetRole || '待填写'}</strong></div>
+              <div><span>引擎</span><strong>{engineLabel(engine)}</strong></div>
+              <div><span>方向</span><strong>{input.targetRole || '待填写'}</strong></div>
               <div>
-                <span>数据来源</span>
+                <span>数据</span>
                 <strong>
                   {inputIsExample
-                    ? '示例数据'
+                    ? '示例'
                     : inputHasContent
-                    ? '真实填写'
+                    ? '真实'
                     : '未填写'}
                 </strong>
               </div>
               {analysisStarted ? (
-                <div className="status-hint">
-                  <span>分析状态</span>
+                <div>
+                  <span>分析</span>
                   <strong>{inputMatchesAnalyzed ? '已同步' : '需重新生成'}</strong>
                 </div>
               ) : null}
-              {analysisError && engine === 'mock' ? (
-                <div className="status-hint"><span>提示</span><strong>已回退 Mock</strong></div>
+              {engine === 'mock' ? (
+                <div><span>提示</span><strong>演示 Mock（非 AI）</strong></div>
               ) : null}
             </div>
           </Card>
@@ -1136,20 +1409,30 @@ function App() {
               <p>围绕目标 JD，把普通经历重构为招聘方认可的能力证据。</p>
             </div>
             <div className="workspace-meta">
-              {analysis ? (
+              {analysisIsCurrent ? (
                 <>
-                  <span className="badge">{analysis.summary.generatedAt}</span>
+                  <span className="badge">
+                    {engine === 'mock' ? '示例演示结果（非 AI 分析）' : analysis.summary.generatedAt}
+                  </span>
                   <span className="badge subtle">Fit Score {analysis.summary.fitScore}</span>
                 </>
-              ) : loading ? (
+              ) : loading || preparingAnalysis ? (
                 <span className="badge subtle">正在调用 MiniMax…</span>
               ) : analysisStarted ? (
-                <span className="badge subtle">本次未生成结果</span>
+                <span className="badge subtle">
+                  {analysis ? '输入已变化，需重新生成' : '本次未生成结果'}
+                </span>
               ) : (
                 <span className="badge subtle">待生成</span>
               )}
             </div>
           </section>
+
+          {translationWarning ? (
+            <div className="note-card" style={{ marginBottom: 12 }}>
+              ⚠️ {translationWarning}；已保留原始 JD 并继续分析。
+            </div>
+          ) : null}
 
           {renderStepContent()}
       </main>
@@ -1216,10 +1499,26 @@ function HeaderBlock({ title, subtitle, right }) {
   );
 }
 
-function DataTable({ columns, rows }) {
+/**
+ * 将 JD 解析结果拆分为多行显示，突出重点
+ */
+function formatJdDetail(text) {
+  if (!text) return text;
+  // 按“；”“、”“\n”拆分，每项单独一行
+  const parts = text.split(/[；;\n]+/).map((s) => s.trim()).filter(Boolean);
+  if (parts.length <= 1) return text;
+  return (
+    <span className="jd-detail-lines">
+      {parts.map((p, i) => <span key={i} className="jd-detail-line">{p}</span>)}
+    </span>
+  );
+}
+
+function DataTable({ columns, rows, wideFirstCol, tableClass }) {
+  const cls = [tableClass, wideFirstCol ? 'wide-first-col' : ''].filter(Boolean).join(' ');
   return (
     <div className="table-wrap card">
-      <table>
+      <table className={cls || undefined}>
         <thead>
           <tr>
             {columns.map((column) => <th key={column}>{column}</th>)}
@@ -1228,7 +1527,11 @@ function DataTable({ columns, rows }) {
         <tbody>
           {rows.map((row, rowIndex) => (
             <tr key={rowIndex}>
-              {row.map((cell, cellIndex) => <td key={`${rowIndex}-${cellIndex}`}>{cell}</td>)}
+              {row.map((cell, cellIndex) => (
+                <td key={`${rowIndex}-${cellIndex}`} className={cellIndex === 0 && wideFirstCol ? 'dim-cell' : 'detail-cell'}>
+                  {cell}
+                </td>
+              ))}
             </tr>
           ))}
         </tbody>
@@ -1339,6 +1642,26 @@ function BulletList({ items }) {
   );
 }
 
+const SUPPORT_CLASS = { '强': 'support-strong', '中': 'support-mid', '弱': 'support-weak', '无': 'support-none' };
+function QuestionList({ items }) {
+  const list = Array.isArray(items) ? items : [];
+  if (!list.length) return <p className="muted">暂无内容</p>;
+  return (
+    <ul className="bullet-list question-list">
+      {list.map((item, i) => {
+        const q = typeof item === 'string' ? item : item.q;
+        const support = typeof item === 'string' ? '' : item.support;
+        return (
+          <li key={i} className="question-item">
+            <span>{q}</span>
+            {support && <em className={`support-badge ${SUPPORT_CLASS[support] || ''}`}>{support}</em>}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
 function EmptyState({ title, description }) {
   return (
     <div className="card empty-state">
@@ -1401,13 +1724,12 @@ function variantLabel(variant) {
     concise: '更简洁',
     conservative: '降低夸张',
     ai: '更偏AI产品',
-    tob: '更偏ToB SaaS',
   }[variant];
 }
 
 function engineLabel(engine) {
   if (engine === 'minimax-m3') return 'MiniMax-M3';
-  if (engine === 'mock') return '本地 Mock（兜底）';
+  if (engine === 'mock') return '本地 Mock';
   return '未启动';
 }
 
@@ -1415,8 +1737,18 @@ function variantTransform(text, variant) {
   if (variant === 'concise') return text.replace('围绕', '').replace('开展', '').replace('相关', '');
   if (variant === 'conservative') return text.replace('推动', '参与推动').replace('完善', '支持完善');
   if (variant === 'ai') return text.includes('AI') ? text : `${text} [可进一步补充AI视角]`;
-  if (variant === 'tob') return text.includes('B端') || text.includes('客户') ? text : `${text} [突出企业客户场景]`;
   return text;
+}
+
+function detectSite(url) {
+  if (!url) return '';
+  if (/zhipin\.com/i.test(url)) return 'boss';
+  if (/lagou\.com/i.test(url)) return 'lagou';
+  if (/liepin\.com/i.test(url)) return 'liepin';
+  if (/linkedin\.com/i.test(url)) return 'linkedin';
+  if (/51job\.com/i.test(url)) return '51job';
+  if (/zhaopin\.com/i.test(url)) return 'zhaopin';
+  return 'other';
 }
 
 export default App;

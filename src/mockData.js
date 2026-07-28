@@ -79,8 +79,13 @@ function deriveResumeContent(input, answers) {
     ? parsedResume.projects.map((item) => optimizeProject(item, input, answers))
     : fallbackProjects(input, answers, sourceBullets);
   const summary = buildSummary(input, parsedResume, mergedSkills, optimizedExperience, answers);
+  // 从原始简历中提取联系信息
+  const contactInfo = extractContact(lines);
   const basic = [
-    parsedResume.name || '候选人',
+    parsedResume.name || contactInfo.name || '候选人',
+    contactInfo.phone ? `电话：${contactInfo.phone}` : '',
+    contactInfo.email ? `邮箱：${contactInfo.email}` : '',
+    contactInfo.location ? `所在地：${contactInfo.location}` : '',
     `目标岗位：${roleSummary || targetRole}`,
     buildHeadline(parsedResume, input),
   ].filter(Boolean);
@@ -225,12 +230,14 @@ function buildInterviewPrep(derived, answers) {
 
   return {
     questions: [
-      `为什么你适合应聘${derived.targetRole}？`,
-      `你在${firstProject}中具体负责了哪些环节？`,
-      '你如何做需求优先级判断与跨团队推进？',
-      '你最能体现业务抽象能力的一次经历是什么？',
-      derived.aiSignal ? '你做过哪些 AI 方向的实际探索？' : '如果转向目标岗位，你最先能复用的能力是什么？',
-      '简历中哪一段最容易被面试官追问细节？',
+      { q: `为什么你适合应聘${derived.targetRole}？`, support: '中' },
+      { q: `你在${firstProject}中具体负责了哪些环节？`, support: '强' },
+      { q: '你如何做需求优先级判断与跨团队推进？', support: '中' },
+      { q: '你最能体现业务抽象能力的一次经历是什么？', support: '弱' },
+      { q: derived.aiSignal ? '你做过哪些 AI 方向的实际探索？' : '如果转向目标岗位，你最先能复用的能力是什么？', support: derived.aiSignal ? '中' : '弱' },
+      { q: '简历中哪一段最容易被面试官追问细节？', support: '中' },
+      { q: '你提到的项目成果如何验证真实性？', support: '弱' },
+      { q: '如果入职后第一个月，你会如何开展工作？', support: '无' },
     ],
     proofs: [
       'PRD、原型、流程图或需求文档示例',
@@ -399,7 +406,7 @@ function optimizeProject(item, input, answers) {
 }
 
 function fallbackExperience(lines, input, answers) {
-  const chunks = lines.filter((line) => line.length > 8).slice(0, 2);
+  const chunks = lines.filter((line) => line.length > 8 && !isPersonalInfoLine(line)).slice(0, 2);
   return chunks.length
     ? chunks.map((line, index) => ({
         company: index === 0 ? '核心经历提炼' : '补充经历提炼',
@@ -452,11 +459,42 @@ function buildPositioning(parsedResume, input, aiSignal) {
   return `${base}，可围绕${input.targetRole || '目标岗位'}进一步强化结果与项目证据`;
 }
 
+// 过滤个人信息行（手机/邮箱/姓名/婚姻/地址等）
+const PERSONAL_INFO_RE = /^(手机|电话|邮箱|微信|婚姻|户籍|所在地|地址|性别|年龄|出生|政治面貌|身份证|求职意向|期望薪资|到岗时间|目前状态|自我评价|个人简介|个人评价|职业目标|联系方式|基本信息|个人信息)|目前|在职|离职|到岗|期望|意向|[\d]{3}[-\s]?\d{4}[-\s]?\d{4}|[\w.+-]+@[\w-]+\.[\w.-]+/;
+
+// 是否像个人信息行（需要过滤）
+function isPersonalInfoLine(line) {
+  if (!line || line.length < 2) return true;
+  if (PERSONAL_INFO_RE.test(line)) return true;
+  // 姓名行：2-4 个中文字 + 可选分隔符 + 其他描述
+  if (/^[\u4e00-\u9fa5]{2,4}\s*[|｜]/.test(line)) return true;
+  // 姓名行：纯 2-4 个中文字
+  if (/^[\u4e00-\u9fa5]{2,4}$/.test(line.trim())) return true;
+  // 节标题行
+  if (/^[\u4e00-\u9fa5]{2,8}[:：]?$/.test(line.trim())) return true;
+  // 纯数字日期
+  if (/^\d{4}[.年-]\d{1,2}/.test(line.trim())) return true;
+  return false;
+}
+
 function buildRewriteTable(sourceBullets, optimizedExperience, optimizedProjects) {
   const optimizedBullets = [...optimizedExperience.flatMap((item) => item.bullets), ...optimizedProjects.flatMap((item) => item.bullets)];
-  const beforeList = sourceBullets.length ? sourceBullets : ['请先输入原始简历内容'];
+  // 仅使用结构化 bullets（工作经历 + 项目经历），严格过滤个人信息
+  const beforeList = sourceBullets.filter((b) => b && !isPersonalInfoLine(b));
 
-  return beforeList.slice(0, 4).map((before, index) => ({
+  if (!beforeList.length) {
+    // 无有效经历时返回引导性提示
+    return [{
+      section: '提示',
+      before: '未检测到有效的工作经历或项目经历内容',
+      after: '请在简历中补充“工作经历”或“项目经历”章节，每条以“-”或“•”开头描述职责与结果。',
+      reason: '简历优化对照需要基于真实经历才能生成有效建议。',
+      risk: '请避免将个人信息（手机/邮箱/地址）当作工作经历内容。',
+    }];
+  }
+
+  return beforeList.slice(0, 6).map((before, index) => ({
+    section: '工作经历',
     before,
     after: optimizedBullets[index] || optimizeBullet(before, { targetRole: '', jd: '', extras: '' }),
     reason: '把原始表述补充为更明确的动作、场景与结果导向表达。',
@@ -533,15 +571,15 @@ function buildEnhancement(input, derived) {
       '包含更多项目细节的完整版（两页）',
       aiSignal ? '突出 AI 能力的版本' : '突出业务结果的版本',
     ],
-    multiVersionAdvice: '建议针对不同公司类型（大厂/创业公司/ToB SaaS）微调简历侧重点，核心经历不变，但摘要和关键词应匹配各自 JD。',
+    multiVersionAdvice: `建议针对不同公司类型（${input.targetCompanyType || '大厂/创业公司/ToB企业'}）微调简历侧重点，核心经历不变，但摘要和关键词应匹配各自 JD。`,
   };
 }
 
 function buildKeywordList(input) {
-  const text = [input.targetRole, input.targetIndustry, input.jd, input.highlightSkills].filter(Boolean).join(' ');
+  const text = [input.targetRole, input.targetIndustry, input.jd, input.highlightSkills, input.resume].filter(Boolean).join(' ');
   const matched = defaultKeywords.filter((keyword) => text.includes(keyword) || (keyword === 'AI产品' && /AI|大模型|智能/.test(text)));
-  const remaining = defaultKeywords.filter((keyword) => !matched.includes(keyword));
-  return unique([...matched, ...remaining]).slice(0, 11);
+  // 仅返回用户输入中实际出现的关键词，不填充无关默认词
+  return matched.length ? unique(matched).slice(0, 11) : ['AI产品'];
 }
 
 function pickTopCapabilities(keywords) {
@@ -645,11 +683,23 @@ function splitLines(text = '') {
 }
 
 function isSectionHeader(line) {
-  return /^(职业摘要|个人简介|工作经历|项目经历|技能|专业技能|教育背景)[:：]?$/.test(line);
+  return /^(职业摘要|个人简介|个人总结|工作经历|工作经验|工作履历|项目经历|项目经验|技能|专业技能|技能清单|教育背景|教育经历|自我评价|个人信息|基本信息|联系方式)[:：]?$/.test(line);
 }
 
 function normalizeHeader(line) {
-  return line.replace(/[:：]$/, '');
+  const cleaned = line.replace(/[:：]$/, '');
+  // 将变体标题统一映射
+  const map = {
+    '工作经验': '工作经历',
+    '工作履历': '工作经历',
+    '项目经验': '项目经历',
+    '专业技能': '技能',
+    '技能清单': '技能',
+    '教育经历': '教育背景',
+    '个人总结': '职业摘要',
+    '个人简介': '职业摘要',
+  };
+  return map[cleaned] || cleaned;
 }
 
 function isBullet(line) {
@@ -667,6 +717,23 @@ function cleanAnswer(text) {
 
 function unique(items) {
   return [...new Set(items.filter(Boolean))];
+}
+
+/** 从简历文本行中提取联系信息 */
+function extractContact(lines) {
+  const text = lines.join('\n');
+  const phoneMatch = text.match(/1[3-9]\d[\s-]?\d{4}[\s-]?\d{4}/);
+  const emailMatch = text.match(/[\w.+-]+@[\w-]+\.[\w.-]+/);
+  const locMatch = text.match(/(北京|上海|广州|深圳|杭州|成都|武汉|南京|苏州|西安|重庆|天津|厦门|青岛|远程|广东|浙江|江苏|四川|湖北|湖南|福建|山东|河南|河北|辽宁|吉林|黑龙江|安徽|江西|广西|云南|贵州|山西|陕西|甘肃|青海|内蒙古|新疆|西藏|海南|宁夏)[^\n]{0,6}/);
+  // 姓名通常是第一行（排除包含“简历”“求职”等字样的行）
+  const nameLine = lines.find((l) => l.trim().length >= 2 && l.trim().length <= 10 && !/简历|求职|目标|岗位|电话|邮箱|手机/.test(l));
+  const name = nameLine ? nameLine.replace(/[|｜].*$/, '').trim() : '';
+  return {
+    name,
+    phone: phoneMatch ? phoneMatch[0] : '',
+    email: emailMatch ? emailMatch[0] : '',
+    location: locMatch ? locMatch[0] : '',
+  };
 }
 
 function compressText(text = '') {

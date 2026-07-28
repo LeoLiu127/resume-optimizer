@@ -9,16 +9,16 @@ export function buildResumeView(analysis, variant = 'balanced') {
   const name = basic[0] || '候选人';
   // 联系方式行通常在 basic[1..] 中，按模式挑出邮箱/电话/位置
   const contactLines = basic.slice(1);
-  const email = contactLines.find((line) => /[\w.+-]+@[\w-]+\.[\w.-]+/.test(line)) || '';
-  const phoneMatch = contactLines
-    .map((line) => line.match(/1[3-9]\d{9}|\d{3,4}[-\s]?\d{3,8}/))
-    .find(Boolean);
-  const phone = phoneMatch ? phoneMatch[0] : '';
-  const location = contactLines.find((line) =>
-    /(北京|上海|广州|深圳|杭州|成都|武汉|南京|苏州|西安|重庆|天津|厦门|青岛|远程|香港|台北)/.test(line),
+  const emailLine = contactLines.find((line) => /[\w.+-]+@[\w-]+\.[\w.-]+/.test(line)) || '';
+  const email = emailLine.replace(/^邮箱[:：]\s*/, '');
+  const phoneLine = contactLines.find((line) => /1[3-9]\d[\s-]?\d{4}[\s-]?\d{4}/.test(line)) || '';
+  const phone = phoneLine.replace(/^电话[:：]\s*/, '');
+  const locationLine = contactLines.find((line) =>
+    /^所在地[:：]/.test(line) || /(北京|上海|广州|深圳|杭州|成都|武汉|南京|苏州|西安|重庆|天津|厦门|青岛|远程|香港|台北)/.test(line),
   ) || '';
+  const location = locationLine.replace(/^所在地[:：]\s*/, '');
   const headline = contactLines.find(
-    (line) => !line.includes('@') && !phoneMatch?.[0]?.includes(line) && line !== location && line !== name,
+    (line) => !line.includes('@') && !/1[3-9]\d/.test(line) && !line.includes('目标岗位') && !line.includes('所在地') && line !== location && line !== name,
   ) || '';
 
   // 应用优化风格转换到 bullets
@@ -66,9 +66,6 @@ function applyVariant(text, variant) {
   }
   if (variant === 'ai' && !/AI|大模型|Prompt|Agent|RAG/.test(text)) {
     return `${text} [可进一步补充 AI 视角]`;
-  }
-  if (variant === 'tob' && !/B端|客户|企业|业务/.test(text)) {
-    return `${text} [突出企业客户场景]`;
   }
   return text;
 }

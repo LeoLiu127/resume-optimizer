@@ -8,6 +8,8 @@ import resumeRoutes from './src/routes/resumes.js';
 import analysisRoutes from './src/routes/analyses.js';
 import analyzeRoutes from './src/routes/analyze.js';
 import adminRoutes from './src/routes/admin.js';
+import positionRoutes from './src/routes/positions.js';
+import jdRoutes from './src/routes/jd.js';
 
 const app = express();
 
@@ -64,6 +66,8 @@ app.use('/api/admin', apiLimiter, adminRoutes);
 app.use('/api/resumes', apiLimiter, resumeRoutes);
 app.use('/api/analyses', apiLimiter, analysisRoutes);
 app.use('/api/analyze', analyzeLimiter, analyzeRoutes);
+app.use('/api/positions', apiLimiter, positionRoutes);
+app.use('/api/jd', apiLimiter, jdRoutes);
 
 // 404
 app.use('/api', (req, res) => {
@@ -84,7 +88,7 @@ const server = app.listen(config.port, () => {
   console.log(`✓ 简历优化大师后端已启动`);
   console.log(`  端口: ${config.port}`);
   console.log(`  邀请码模式: ${config.invite.inviteOnly ? '开启' : '关闭'}`);
-  console.log(`  MiniMax API: ${isMiniMaxConfigured() ? '已配置' : '未配置（将回退到 mock）'}`);
+  console.log(`  MiniMax API: ${isMiniMaxConfigured() ? '已配置' : '未配置（AI 请求将返回配置错误）'}`);
   console.log(`  CORS 白名单: ${config.corsOrigins.join(', ')}`);
   console.log(`  健康检查: http://localhost:${config.port}/api/health`);
   console.log('==================================================');

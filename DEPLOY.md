@@ -167,7 +167,6 @@ vim .env   # 关键：把 VITE_API_BASE 指向同源 /api（让 Nginx 转发）
 # 同源反代：前端请求 /api/* 由 Nginx 转发到 :4000
 # 这样浏览器看是同源，没有 CORS 问题
 VITE_API_BASE=/api
-VITE_USE_MOCK_FALLBACK=false
 ```
 
 构建：

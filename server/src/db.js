@@ -101,20 +101,50 @@ function initSchema(database) {
     );
 
     CREATE INDEX IF NOT EXISTS idx_bullets_user ON followup_bullets(user_id, created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS positions (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      company TEXT,
+      url TEXT,
+      source_site TEXT,
+      jd_content TEXT,
+      target_industry TEXT,
+      target_company_type TEXT,
+      job_stage TEXT,
+      highlight_skills TEXT,
+      extras TEXT,
+      status TEXT NOT NULL DEFAULT 'preparing',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_positions_user ON positions(user_id, updated_at DESC);
   `);
   applyMigrations(database);
 }
 
 /**
- * 轻量迁移：给已存在的 users 表补充新列
+ * 轻量迁移：给已存在的表补充新列
  */
 function applyMigrations(database) {
+  // users 表迁移
   const cols = database.prepare('PRAGMA table_info(users)').all();
   const colNames = new Set(cols.map((c) => c.name));
   const alters = [];
   if (!colNames.has('password_hash')) alters.push('ALTER TABLE users ADD COLUMN password_hash TEXT');
   if (!colNames.has('role')) alters.push("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'");
   if (!colNames.has('status')) alters.push("ALTER TABLE users ADD COLUMN status TEXT NOT NULL DEFAULT 'active'");
+
+  // resumes 表迁移：新增 position_id 关联岗位
+  const resumeCols = database.prepare('PRAGMA table_info(resumes)').all();
+  const resumeColNames = new Set(resumeCols.map((c) => c.name));
+  if (!resumeColNames.has('position_id')) {
+    alters.push('ALTER TABLE resumes ADD COLUMN position_id TEXT REFERENCES positions(id) ON DELETE SET NULL');
+  }
+
   for (const sql of alters) {
     try {
       database.exec(sql);
@@ -123,7 +153,16 @@ function applyMigrations(database) {
       // 列已存在则忽略
     }
   }
-  // 兼容旧库：如果库里没有用户，种子阶段不需处理
+
+  try {
+    database.exec(
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_positions_user_url_unique
+       ON positions(user_id, url)
+       WHERE trim(url) <> ''`,
+    );
+  } catch (err) {
+    console.warn('[db] 岗位 URL 唯一索引暂未创建，请先清理旧重复岗位：', err.message);
+  }
 }
 
 export function closeDb() {

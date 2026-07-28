@@ -14,6 +14,12 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  answerStorageKeys,
+  clearAllAnswerStorage,
+  clearTransientAnswerStorage,
+  ensureTransientAnswerContext,
+} from '../services/answerStorage';
 
 /* ============ 工具函数 ============ */
 
@@ -53,9 +59,7 @@ function safeSet(key, value) {
  * @param {string} userId - 当前登录用户 id（未登录传 ''）
  */
 export function usePersistentAnswers(userId) {
-  const bankKey = `resume.answerBank.${userId || 'guest'}`;
-  const answersKey = `resume.answers.${userId || 'guest'}`;
-  const bulletsKey = `resume.bullets.${userId || 'guest'}`;
+  const { bankKey, answersKey, bulletsKey } = answerStorageKeys(userId);
 
   // 当前回答 { [askItemId]: string }
   const [answers, setAnswersRaw] = useState(() => safeGet(answersKey) || {});
@@ -95,27 +99,40 @@ export function usePersistentAnswers(userId) {
 
   /* ---- 公开 API ---- */
 
-  /** 更新某个 askItem 的回答（同时写入记忆库） */
-  const setAnswer = useCallback(
-    (askItem, value) => {
-      setAnswersRaw((prev) => ({ ...prev, [askItem.id]: value }));
-      // 同步到记忆库
-      if (value.trim()) {
-        const fp = fingerprint(askItem.question);
-        bankRef.current = {
-          ...bankRef.current,
-          [fp]: {
-            title: askItem.title,
-            question: askItem.question,
-            answer: value,
-            bullet: followUpBullets[askItem.id] || bankRef.current[fp]?.bullet || '',
-            updatedAt: Date.now(),
-          },
-        };
-        safeSet(bankKey, bankRef.current);
-      }
+  /** 更新某个 askItem 的回答（仅更新本地状态，不写入记忆库） */
+  const setAnswer = useCallback((askItem, value) => {
+    setAnswersRaw((prev) => ({ ...prev, [askItem.id]: value }));
+  }, []);
+
+  /** 手动保存某个 askItem 的回答到记忆库（用户点击“保存记忆”按钮） */
+  const saveToMemory = useCallback(
+    (askItem) => {
+      const value = answers[askItem.id] || '';
+      if (!value.trim()) return false;
+      const fp = fingerprint(askItem.question);
+      bankRef.current = {
+        ...bankRef.current,
+        [fp]: {
+          title: askItem.title,
+          question: askItem.question,
+          answer: value,
+          bullet: followUpBullets[askItem.id] || bankRef.current[fp]?.bullet || '',
+          updatedAt: Date.now(),
+        },
+      };
+      safeSet(bankKey, bankRef.current);
+      return true;
     },
-    [bankKey, followUpBullets],
+    [bankKey, answers, followUpBullets],
+  );
+
+  /** 检查某个问题是否已保存在记忆库中 */
+  const isInMemory = useCallback(
+    (askItem) => {
+      const fp = fingerprint(askItem.question);
+      return Boolean(bankRef.current[fp]?.answer);
+    },
+    [],
   );
 
   /** 批量设置 answers（用于恢复/预填充） */
@@ -127,11 +144,11 @@ export function usePersistentAnswers(userId) {
     }
   }, []);
 
-  /** 保存 AI 生成的 bullet（同时更新记忆库） */
+  /** 保存 AI 生成的 bullet（同时更新记忆库中对应条目） */
   const saveBullet = useCallback(
     (askItem, bullet) => {
       setFollowUpBulletsRaw((prev) => ({ ...prev, [askItem.id]: bullet }));
-      // 更新记忆库中对应条目的 bullet
+      // 仅当记忆库中已有该问题时更新 bullet（不自动创建新记忆）
       const fp = fingerprint(askItem.question);
       const existing = bankRef.current[fp];
       if (existing) {
@@ -139,21 +156,10 @@ export function usePersistentAnswers(userId) {
           ...bankRef.current,
           [fp]: { ...existing, bullet, updatedAt: Date.now() },
         };
-      } else {
-        bankRef.current = {
-          ...bankRef.current,
-          [fp]: {
-            title: askItem.title,
-            question: askItem.question,
-            answer: answers[askItem.id] || '',
-            bullet,
-            updatedAt: Date.now(),
-          },
-        };
+        safeSet(bankKey, bankRef.current);
       }
-      safeSet(bankKey, bankRef.current);
     },
-    [bankKey, answers],
+    [bankKey],
   );
 
   const setFollowUpBullets = useCallback((next) => {
@@ -225,19 +231,26 @@ export function usePersistentAnswers(userId) {
     setFollowUpBulletsRaw({});
     bankRef.current = {};
     setNewItemIds(new Set());
-    safeSet(bankKey, null);
-    safeSet(answersKey, null);
-    safeSet(bulletsKey, null);
-  }, [bankKey, answersKey, bulletsKey]);
+    clearAllAnswerStorage(localStorage, userId);
+  }, [userId]);
 
   /** 仅清空当前回答（保留记忆库，用于"使用示例数据"） */
   const clearCurrent = useCallback(() => {
     setAnswersRaw({});
     setFollowUpBulletsRaw({});
     setNewItemIds(new Set());
-    safeSet(answersKey, null);
-    safeSet(bulletsKey, null);
-  }, [answersKey, bulletsKey]);
+    clearTransientAnswerStorage(localStorage, userId);
+  }, [userId]);
+
+  const ensureContext = useCallback((context) => {
+    const changed = ensureTransientAnswerContext(localStorage, userId, context);
+    if (changed) {
+      setAnswersRaw({});
+      setFollowUpBulletsRaw({});
+      setNewItemIds(new Set());
+    }
+    return changed;
+  }, [userId]);
 
   /** 记忆库中已有回答的数量 */
   const memoryCount = Object.keys(bankRef.current).filter(
@@ -248,6 +261,8 @@ export function usePersistentAnswers(userId) {
     answers,
     setAnswers,
     setAnswer,
+    saveToMemory,
+    isInMemory,
     followUpBullets,
     setFollowUpBullets,
     saveBullet,
@@ -255,6 +270,7 @@ export function usePersistentAnswers(userId) {
     newItemIds,
     clearAll,
     clearCurrent,
+    ensureContext,
     memoryCount,
   };
 }

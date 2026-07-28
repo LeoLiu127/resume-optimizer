@@ -2,12 +2,12 @@
  * 简历分析 Hook（已迁移到后端 API 代理）
  *
  * 所有 AI 调用都通过后端 /api/analyze/*，前端不再持有 API Key。
- * 网络/认证失败时降级到本地 mock，保证演示可用。
+ * 失败时保留用户输入并展示真实错误，不用本地 mock 冒充 AI 结果。
  */
 
 import { useCallback, useRef, useState } from 'react';
 import { ai, auth as authApi } from '../services/api';
-import { buildMockAnalysis, exampleInput } from '../mockData';
+import { analysisFailureState } from '../services/analysisPolicy';
 
 const REQUIRED_DIMENSIONS = [
   '岗位匹配度',
@@ -164,7 +164,10 @@ function normalizeRewriteTable(items) {
 function normalizeInterviewPrep(prep) {
   const src = prep || {};
   return {
-    questions: asArray(src.questions).map(asString).filter(Boolean),
+    questions: asArray(src.questions).map((item) => {
+      if (typeof item === 'string') return { q: item, support: '' };
+      return { q: asString(item?.q, ''), support: asString(item?.support, '') };
+    }).filter((it) => it.q),
     proofs: asArray(src.proofs).map(asString).filter(Boolean),
     riskyClaims: asArray(src.riskyClaims).map(asString).filter(Boolean),
     missingData: asArray(src.missingData).map(asString).filter(Boolean),
@@ -227,16 +230,6 @@ export function useResumeAnalysis() {
   const [engine, setEngine] = useState('');
   const cacheRef = useRef({});
 
-  const fallbackToMock = (input, answers, reason) => {
-    console.warn(`[useResumeAnalysis] 回退到 mock：${reason}`);
-    const fallbackName = input?.resume?.split('\n')?.[0]?.slice(0, 12) || '候选人';
-    const mock = buildMockAnalysis({ ...exampleInput, ...input }, answers || {});
-    const normalized = normalizeAnalysis(mock, fallbackName);
-    setData(normalized);
-    setEngine('mock');
-    return normalized;
-  };
-
   const analyze = useCallback(async (input, answers) => {
     if (loading) return null;
     setLoading(true);
@@ -252,21 +245,19 @@ export function useResumeAnalysis() {
       setEngine(res.engine || 'minimax-m3');
       return normalized;
     } catch (err) {
-      // 401 / 网络错误 → 回退 mock（不阻塞用户首次体验）
       const isUnauthed = err.code === 'UNAUTHED';
       const isNetwork = err.code === 'NETWORK';
-      if (isUnauthed) {
+      if (isUnauthed || isNetwork) {
+        setData(null);
+        setEngine('');
         setError(err.message);
         return null;
       }
-      if (isNetwork) {
-        setError(err.message);
-        return null;
-      }
-      // 502 等 → 静默回退 mock + 标记 fallback
-      const result = fallbackToMock(input, answers, err.message);
-      setError(`AI 不可用（${err.message}），已使用示例数据演示`);
-      return result;
+      const failure = analysisFailureState(err);
+      setData(failure.data);
+      setEngine(failure.engine);
+      setError(failure.error);
+      return null;
     } finally {
       setLoading(false);
     }

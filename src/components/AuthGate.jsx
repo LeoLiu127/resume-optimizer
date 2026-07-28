@@ -182,6 +182,17 @@ export function AuthGate({ children }) {
       .catch((err) => setError(err.message));
   }, []);
 
+  useEffect(() => {
+    const onLogout = () => {
+      setUser(null);
+      setAuthed(false);
+      setTab(TABS.LOGIN);
+      setPassword('');
+    };
+    window.addEventListener('resume:logout', onLogout);
+    return () => window.removeEventListener('resume:logout', onLogout);
+  }, []);
+
   // 切 tab 清空状态
   useEffect(() => {
     setError('');
@@ -229,15 +240,12 @@ export function AuthGate({ children }) {
   };
 
   const handleLogout = async () => {
+    await auth.logout();
     try {
-      window.dispatchEvent(new CustomEvent('resume:logout'));
+      window.dispatchEvent(new CustomEvent('resume:logout', { detail: { reason: 'manual' } }));
     } catch {
       /* ignore */
     }
-    await auth.logout();
-    setUser(null);
-    setAuthed(false);
-    setTab(TABS.LOGIN);
   };
 
   const handleChangePassword = async ({ oldPassword, newPassword }) => {
@@ -354,7 +362,7 @@ export function AuthGate({ children }) {
             </p>
             {bootstrap && !bootstrap.minimaxConfigured ? (
               <p className="auth-warn">
-                ⚠️ 服务端未配置 MiniMax API Key，将使用本地示例数据演示。
+                ⚠️ 服务端未配置 MiniMax API Key，AI 分析暂不可用。
               </p>
             ) : null}
           </div>
