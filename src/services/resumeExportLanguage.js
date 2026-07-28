@@ -1,8 +1,3 @@
-export const LANGUAGES = [
-  { key: 'zh', label: '中文简历', shortLabel: '中文' },
-  { key: 'en', label: 'English Resume', shortLabel: 'EN' },
-];
-
 function sortKeysRecursively(value) {
   if (Array.isArray(value)) {
     return value.map(sortKeysRecursively);

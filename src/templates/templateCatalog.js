@@ -1,3 +1,8 @@
+export const LANGUAGES = [
+  { key: 'zh', label: '中文简历', shortLabel: '中文' },
+  { key: 'en', label: 'English Resume', shortLabel: 'EN' },
+];
+
 export const TEMPLATES = [
   {
     key: 'classic',

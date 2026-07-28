@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { TEMPLATES } from '../../src/templates/templateCatalog.js';
+import { LANGUAGES, TEMPLATES } from '../../src/templates/templateCatalog.js';
 import {
   buildLocalizedAnalysis,
   createEnglishCacheKey,
@@ -15,10 +15,35 @@ test('template catalog preserves stable keys with new names', () => {
   ]);
 });
 
+test('template catalog exposes supported export languages', () => {
+  assert.deepEqual(LANGUAGES.map(({ key, label }) => [key, label]), [
+    ['zh', '中文简历'],
+    ['en', 'English Resume'],
+  ]);
+});
+
 test('english cache key changes with resume content', () => {
   assert.notEqual(
     createEnglishCacheKey({ basic: ['A'] }, 'PM'),
     createEnglishCacheKey({ basic: ['B'] }, 'PM'),
+  );
+});
+
+test('cache key includes role and structured resume', () => {
+  const resume = { basic: ['张晨'], summary: '产品经理' };
+  assert.notEqual(
+    createEnglishCacheKey(resume, '产品经理'),
+    createEnglishCacheKey(resume, '运营经理'),
+  );
+  assert.equal(
+    createEnglishCacheKey(
+      { basic: ['张晨'], experience: [{ company: 'A', title: '产品经理' }] },
+      '产品经理',
+    ),
+    createEnglishCacheKey(
+      { experience: [{ title: '产品经理', company: 'A' }], basic: ['张晨'] },
+      '产品经理',
+    ),
   );
 });
 

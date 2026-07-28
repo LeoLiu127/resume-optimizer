@@ -1363,6 +1363,80 @@ button:disabled {
   color: var(--text-muted);
 }
 
+.export-language-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.export-language-btn,
+.export-retry-btn {
+  font: inherit;
+  cursor: pointer;
+}
+
+.export-language-btn {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 9px 10px;
+  background: var(--bg-secondary-btn);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.export-language-btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-input);
+}
+
+.export-language-btn.active {
+  border-color: var(--bg-primary-btn);
+  background: var(--bg-chip-active);
+  color: var(--text-primary);
+}
+
+.export-language-status,
+.export-language-error {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  border-radius: 10px;
+  padding: 8px 10px;
+}
+
+.export-language-status {
+  color: var(--text-secondary);
+  background: var(--bg-badge-subtle);
+}
+
+.export-language-error {
+  color: var(--text-error);
+  background: var(--bg-error);
+  border: 1px solid var(--border-error);
+}
+
+.export-language-error span {
+  flex: 1;
+}
+
+.export-retry-btn {
+  border: 0;
+  border-radius: 6px;
+  padding: 3px 6px;
+  background: transparent;
+  color: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: underline;
+}
+
+.export-retry-btn:hover {
+  background: color-mix(in srgb, var(--text-error) 10%, transparent);
+}
+
 .export-template-list {
   display: grid;
   grid-template-columns: 1fr;
