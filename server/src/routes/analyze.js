@@ -15,7 +15,7 @@ import {
 } from '../../../src/services/prompts.js';
 import { buildMockAnalysis, exampleInput } from '../../../src/mockData.js';
 import { normalizeRewriteItems } from '../ai-response.js';
-import { normalizeEnglishResume } from '../resume-english.js';
+import { normalizeEnglishResume, validateEnglishResumeRequest } from '../resume-english.js';
 import { extractJsonObject } from '../json-response.js';
 import { createMiniMaxClient } from '../minimax-client.js';
 
@@ -211,8 +211,10 @@ router.post(
   '/resume-english',
   asyncRoute(async (req, res) => {
     const { finalResume, role } = req.body || {};
-    if (!finalResume || typeof finalResume !== 'object') {
-      return res.status(400).json({ error: 'finalResume 必填' });
+    try {
+      validateEnglishResumeRequest(finalResume);
+    } catch {
+      return res.status(400).json({ error: 'finalResume 必填或结构无效' });
     }
     if (!isMiniMaxConfigured()) {
       return res.status(503).json({ error: '服务端未配置 MiniMax API Key' });
@@ -232,7 +234,7 @@ router.post(
       return res.json({ engine: 'minimax-m3', ...normalized });
     } catch (err) {
       console.error('[analyze:resume-english] MiniMax 失败:', err.message);
-      return res.status(502).json({ error: `英文简历生成失败：${err.message || 'MiniMax 调用失败'}` });
+      return res.status(502).json({ error: '英文简历生成失败' });
     }
   }),
 );

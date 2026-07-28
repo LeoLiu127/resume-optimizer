@@ -1,49 +1,110 @@
-function asString(value, fallback = '') {
-  if (value === undefined || value === null) return fallback;
-  return String(value).trim();
+function invalidSchema(path) {
+  throw new Error(`英文简历结构无效：${path}`);
 }
 
-function asArray(value) {
-  if (Array.isArray(value)) return value;
-  if (value === undefined || value === null) return [];
-  return [value];
+function assertObject(value, path) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    invalidSchema(path);
+  }
+}
+
+function assertString(value, path) {
+  if (typeof value !== 'string') {
+    invalidSchema(path);
+  }
+}
+
+function assertStringArray(value, path) {
+  if (!Array.isArray(value)) {
+    invalidSchema(path);
+  }
+  value.forEach((item, index) => assertString(item, `${path}[${index}]`));
+}
+
+function assertExperience(item, path) {
+  assertObject(item, path);
+  assertString(item.company, `${path}.company`);
+  assertString(item.title, `${path}.title`);
+  assertString(item.period, `${path}.period`);
+  assertStringArray(item.bullets, `${path}.bullets`);
+}
+
+function assertProject(item, path) {
+  assertObject(item, path);
+  assertString(item.name, `${path}.name`);
+  assertString(item.period, `${path}.period`);
+  assertStringArray(item.bullets, `${path}.bullets`);
+}
+
+export function validateEnglishResumeRequest(finalResume) {
+  assertObject(finalResume, 'finalResume');
+  assertStringArray(finalResume.basic, 'finalResume.basic');
+  assertString(finalResume.jobIntention, 'finalResume.jobIntention');
+  assertString(finalResume.summary, 'finalResume.summary');
+  assertStringArray(finalResume.skills, 'finalResume.skills');
+  assertStringArray(finalResume.tools, 'finalResume.tools');
+  if (!Array.isArray(finalResume.experience)) {
+    invalidSchema('finalResume.experience');
+  }
+  finalResume.experience.forEach((item, index) => assertExperience(item, `finalResume.experience[${index}]`));
+  if (!Array.isArray(finalResume.projects)) {
+    invalidSchema('finalResume.projects');
+  }
+  finalResume.projects.forEach((item, index) => assertProject(item, `finalResume.projects[${index}]`));
+  assertString(finalResume.education, 'finalResume.education');
+  assertStringArray(finalResume.extras, 'finalResume.extras');
+}
+
+function assertSameLength(source, translated, path) {
+  if (source.length !== translated.length) {
+    invalidSchema(`${path} 数量不一致`);
+  }
+}
+
+function assertPreservedEntryCounts(source, translated) {
+  for (const field of ['basic', 'skills', 'tools', 'experience', 'projects', 'extras']) {
+    assertSameLength(source[field], translated[field], `finalResume.${field}`);
+  }
+  source.experience.forEach((item, index) => {
+    assertSameLength(item.bullets, translated.experience[index].bullets, `finalResume.experience[${index}].bullets`);
+  });
+  source.projects.forEach((item, index) => {
+    assertSameLength(item.bullets, translated.projects[index].bullets, `finalResume.projects[${index}].bullets`);
+  });
 }
 
 function normalizeFinalResume(resume) {
-  const basic = asArray(resume?.basic).map((value) => asString(value)).filter(Boolean);
   return {
-    basic,
-    jobIntention: asString(resume?.jobIntention),
-    summary: asString(resume?.summary),
-    skills: asArray(resume?.skills).map((value) => asString(value)).filter(Boolean).slice(0, 12),
-    tools: asArray(resume?.tools).map((value) => asString(value)).filter(Boolean).slice(0, 12),
-    experience: asArray(resume?.experience)
-      .map((item) => ({
-        company: asString(item?.company),
-        title: asString(item?.title),
-        period: asString(item?.period),
-        bullets: asArray(item?.bullets).map((value) => asString(value)).filter(Boolean).slice(0, 6),
-      }))
-      .filter((item) => item.company || item.title || item.bullets.length),
-    projects: asArray(resume?.projects)
-      .map((item) => ({
-        name: asString(item?.name),
-        period: asString(item?.period),
-        bullets: asArray(item?.bullets).map((value) => asString(value)).filter(Boolean).slice(0, 6),
-      }))
-      .filter((item) => item.name || item.bullets.length),
-    education: asString(resume?.education),
-    extras: asArray(resume?.extras).map((value) => asString(value)).filter(Boolean).slice(0, 6),
+    basic: [...resume.basic],
+    jobIntention: resume.jobIntention,
+    summary: resume.summary,
+    skills: [...resume.skills],
+    tools: [...resume.tools],
+    experience: resume.experience.map((item) => ({
+      company: item.company,
+      title: item.title,
+      period: item.period,
+      bullets: [...item.bullets],
+    })),
+    projects: resume.projects.map((item) => ({
+      name: item.name,
+      period: item.period,
+      bullets: [...item.bullets],
+    })),
+    education: resume.education,
+    extras: [...resume.extras],
   };
 }
 
 export function normalizeEnglishResume(value, fallback = {}) {
-  if (!value?.finalResume || typeof value.finalResume !== 'object' || Array.isArray(value.finalResume)) {
-    throw new Error('英文简历结构无效：缺少 finalResume');
-  }
+  assertObject(value, 'response');
+  assertString(value.role, 'role');
+  validateEnglishResumeRequest(value.finalResume);
+  validateEnglishResumeRequest(fallback.finalResume);
+  assertPreservedEntryCounts(fallback.finalResume, value.finalResume);
 
   return {
-    role: asString(value.role, asString(fallback.role)),
+    role: value.role,
     finalResume: normalizeFinalResume(value.finalResume),
   };
 }

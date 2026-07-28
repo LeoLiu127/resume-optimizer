@@ -17,6 +17,18 @@ import resumeRoutes from '../src/routes/resumes.js';
 const testDir = mkdtempSync(join(tmpdir(), 'resume-api-contract-'));
 const token = 'test-token-that-is-long-enough-for-auth';
 const userId = 'test-user';
+const networkFetch = globalThis.fetch;
+const englishResumeInput = {
+  basic: ['张晨', 'AI产品经理'],
+  jobIntention: 'AI产品经理',
+  summary: '负责企业产品。',
+  skills: ['需求分析'],
+  tools: ['Figma'],
+  experience: [{ company: 'A科技', title: '产品经理', period: '2021-至今', bullets: ['负责需求'] }],
+  projects: [],
+  education: 'XX大学 本科',
+  extras: [],
+};
 
 let server;
 let baseUrl;
@@ -61,7 +73,11 @@ after(async () => {
 });
 
 async function request(path, options = {}) {
-  const response = await fetch(`${baseUrl}${path}`, {
+  return requestAt(baseUrl, path, options);
+}
+
+async function requestAt(origin, path, options = {}) {
+  const response = await networkFetch(`${origin}${path}`, {
     ...options,
     headers: {
       Authorization: `Bearer ${token}`,
@@ -71,6 +87,35 @@ async function request(path, options = {}) {
   });
   const body = await response.json();
   return { status: response.status, body };
+}
+
+async function withEnglishProvider(fetchImpl, run) {
+  const originalFetch = globalThis.fetch;
+  const originalMiniMax = { ...config.minimax };
+  let isolatedServer;
+  try {
+    config.minimax.apiKey = 'test-minimax-key';
+    config.minimax.baseUrl = 'https://minimax.test/v1';
+    globalThis.fetch = fetchImpl;
+    const moduleUrl = new URL(`../src/routes/analyze.js?english-test=${crypto.randomUUID()}`, import.meta.url);
+    const { default: isolatedRoutes } = await import(moduleUrl);
+    const app = express();
+    app.use(express.json());
+    app.use('/api/analyze', isolatedRoutes);
+    await new Promise((resolve) => {
+      isolatedServer = app.listen(0, '127.0.0.1', resolve);
+    });
+    const { port } = isolatedServer.address();
+    await run((path, options) => requestAt(`http://127.0.0.1:${port}`, path, options));
+  } finally {
+    if (isolatedServer) {
+      await new Promise((resolve, reject) => {
+        isolatedServer.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
+    Object.assign(config.minimax, originalMiniMax);
+    globalThis.fetch = originalFetch;
+  }
 }
 
 test('POST /api/analyze does not silently return mock by default', async () => {
@@ -141,10 +186,65 @@ test('POST /api/analyze/resume-english validates finalResume', async () => {
 test('POST /api/analyze/resume-english reports missing MiniMax config', async () => {
   const result = await request('/api/analyze/resume-english', {
     method: 'POST',
-    body: JSON.stringify({ finalResume: { basic: ['张晨'] }, role: 'AI产品经理' }),
+    body: JSON.stringify({ finalResume: englishResumeInput, role: 'AI产品经理' }),
   });
   assert.equal(result.status, 503);
   assert.match(result.body.error, /MiniMax API Key/);
+});
+
+test('POST /api/analyze/resume-english rejects malformed request schemas before MiniMax', async () => {
+  const malformedBodies = [
+    { finalResume: [], role: 'AI产品经理' },
+    { finalResume: { basic: ['张晨'] }, role: 'AI产品经理' },
+    { finalResume: { ...englishResumeInput, skills: '需求分析' }, role: 'AI产品经理' },
+    { finalResume: { ...englishResumeInput, experience: [{ ...englishResumeInput.experience[0], bullets: '负责需求' }] }, role: 'AI产品经理' },
+  ];
+
+  for (const body of malformedBodies) {
+    const result = await request('/api/analyze/resume-english', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+    assert.equal(result.status, 400);
+    assert.match(result.body.error, /finalResume/);
+  }
+});
+
+test('POST /api/analyze/resume-english hides provider failure details', async () => {
+  await withEnglishProvider(
+    async () => { throw new Error('private provider diagnostic'); },
+    async (requestToIsolatedServer) => {
+      const result = await requestToIsolatedServer('/api/analyze/resume-english', {
+        method: 'POST',
+        body: JSON.stringify({ finalResume: englishResumeInput, role: 'AI Product Manager' }),
+      });
+      assert.equal(result.status, 502);
+      assert.equal(result.body.error, '英文简历生成失败');
+    },
+  );
+});
+
+test('POST /api/analyze/resume-english hides JSON and normalization failure details', async () => {
+  const malformedCompletions = [
+    'not valid JSON',
+    JSON.stringify({ role: 'AI Product Manager', finalResume: { basic: ['Zhang Chen'] } }),
+  ];
+
+  for (const content of malformedCompletions) {
+    await withEnglishProvider(
+      async () => new Response(JSON.stringify({
+        choices: [{ message: { content }, finish_reason: 'stop' }],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+      async (requestToIsolatedServer) => {
+        const result = await requestToIsolatedServer('/api/analyze/resume-english', {
+          method: 'POST',
+          body: JSON.stringify({ finalResume: englishResumeInput, role: 'AI Product Manager' }),
+        });
+        assert.equal(result.status, 502);
+        assert.equal(result.body.error, '英文简历生成失败');
+      },
+    );
+  }
 });
 
 test('POST /api/jd/translate returns a stable bilingual contract for Chinese content', async () => {
