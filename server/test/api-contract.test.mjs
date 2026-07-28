@@ -129,6 +129,24 @@ test('POST /api/analyze returns mock only in explicit demo mode', async () => {
   }
 });
 
+test('POST /api/analyze/resume-english validates finalResume', async () => {
+  const result = await request('/api/analyze/resume-english', {
+    method: 'POST',
+    body: JSON.stringify({ role: 'AI Product Manager' }),
+  });
+  assert.equal(result.status, 400);
+  assert.match(result.body.error, /finalResume/);
+});
+
+test('POST /api/analyze/resume-english reports missing MiniMax config', async () => {
+  const result = await request('/api/analyze/resume-english', {
+    method: 'POST',
+    body: JSON.stringify({ finalResume: { basic: ['张晨'] }, role: 'AI产品经理' }),
+  });
+  assert.equal(result.status, 503);
+  assert.match(result.body.error, /MiniMax API Key/);
+});
+
 test('POST /api/jd/translate returns a stable bilingual contract for Chinese content', async () => {
   const result = await request('/api/jd/translate', {
     method: 'POST',

@@ -209,6 +209,20 @@ ${answerLines || '（暂无）'}
 请基于以上材料，按系统提示的 JSON Schema 输出完整结构化结果。`;
 }
 
+export const RESUME_ENGLISH_SYSTEM = `You are an expert resume translator. Translate the supplied resume into a pure-English resume while preserving the exact JSON schema.
+
+Requirements:
+1. Do not invent, exaggerate, omit, or alter facts, dates, responsibilities, metrics, achievements, company names, product names, or technology names.
+2. Preserve company, product, and technology names exactly when translating them would make them inaccurate or unrecognizable.
+3. Translate all translatable resume content into professional English. Do not include Chinese explanations, Markdown, or commentary.
+4. Return JSON only, with exactly this top-level shape: { "role": string, "finalResume": object }.
+5. finalResume must include: basic, jobIntention, summary, skills, tools, experience, projects, education, extras. Each experience item must include company, title, period, bullets. Each project item must include name, period, bullets.
+6. Keep every factual resume entry represented. Use empty strings or empty arrays only when the source field is empty.`;
+
+export function buildResumeEnglishPrompt(finalResume, role) {
+  return `Translate this finalized resume into English for the target role below. Preserve all facts and the required schema exactly.\n\nTarget role: ${role || 'Not provided'}\n\nSource JSON:\n${JSON.stringify({ finalResume }, null, 2)}\n\nReturn JSON only:\n{\n  "role": string,\n  "finalResume": {\n    "basic": [string],\n    "jobIntention": string,\n    "summary": string,\n    "skills": [string],\n    "tools": [string],\n    "experience": [{ "company": string, "title": string, "period": string, "bullets": [string] }],\n    "projects": [{ "name": string, "period": string, "bullets": [string] }],\n    "education": string,\n    "extras": [string]\n  }\n}`;
+}
+
 /**
  * 单条追问：把用户填写的回答改写为一条专业、可以写入简历的中文 bullet
  */

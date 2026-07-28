@@ -10,9 +10,12 @@ import {
   buildOptimizeStylePrompt,
   ENHANCEMENT_SYSTEM,
   buildEnhancementPrompt,
+  RESUME_ENGLISH_SYSTEM,
+  buildResumeEnglishPrompt,
 } from '../../../src/services/prompts.js';
 import { buildMockAnalysis, exampleInput } from '../../../src/mockData.js';
 import { normalizeRewriteItems } from '../ai-response.js';
+import { normalizeEnglishResume } from '../resume-english.js';
 import { extractJsonObject } from '../json-response.js';
 import { createMiniMaxClient } from '../minimax-client.js';
 
@@ -195,6 +198,41 @@ router.post(
       });
     } catch (err) {
       return res.status(502).json({ error: err.message || '补强建议生成失败' });
+    }
+  }),
+);
+
+/**
+ * 纯英文简历生成
+ * POST /api/analyze/resume-english
+ * body: { finalResume, role }
+ */
+router.post(
+  '/resume-english',
+  asyncRoute(async (req, res) => {
+    const { finalResume, role } = req.body || {};
+    if (!finalResume || typeof finalResume !== 'object') {
+      return res.status(400).json({ error: 'finalResume 必填' });
+    }
+    if (!isMiniMaxConfigured()) {
+      return res.status(503).json({ error: '服务端未配置 MiniMax API Key' });
+    }
+    try {
+      const completion = await minimaxClient.complete(
+        [
+          { role: 'system', content: RESUME_ENGLISH_SYSTEM },
+          { role: 'user', content: buildResumeEnglishPrompt(finalResume, role) },
+        ],
+        { maxCompletionTokens: 12_288 },
+      );
+      const normalized = normalizeEnglishResume(
+        extractJsonObject(completion.content),
+        { finalResume, role },
+      );
+      return res.json({ engine: 'minimax-m3', ...normalized });
+    } catch (err) {
+      console.error('[analyze:resume-english] MiniMax 失败:', err.message);
+      return res.status(502).json({ error: `英文简历生成失败：${err.message || 'MiniMax 调用失败'}` });
     }
   }),
 );
