@@ -80,9 +80,28 @@ function elementMarkup(markup, tag) {
   return markup.match(new RegExp(`<${tag}[^>]*>[\\s\\S]*?</${tag}>`))?.[0] || '';
 }
 
+function collectReactText(node) {
+  if (node === null || node === undefined || typeof node === 'boolean') return '';
+  if (typeof node === 'string' || typeof node === 'number') return String(node);
+  if (Array.isArray(node)) return node.map(collectReactText).join('');
+  if (!React.isValidElement(node)) return '';
+  if (typeof node.type === 'function') return collectReactText(node.type(node.props));
+  return collectReactText(node.props.children);
+}
+
 async function docxDocumentXml(blob) {
+  return docxPart(blob, 'word/document.xml');
+}
+
+async function docxPart(blob, path) {
   const zip = await JSZip.loadAsync(await blob.arrayBuffer());
-  return zip.file('word/document.xml').async('string');
+  return zip.file(path).async('string');
+}
+
+function xmlAttributes(element) {
+  return Object.fromEntries(
+    Array.from(element.matchAll(/\b([\w:]+)="([^"]*)"/g), ([, name, value]) => [name, value]),
+  );
 }
 
 test('preview templates: export real renderable components', () => {
@@ -319,7 +338,7 @@ test('document templates: long DOCX facts survive real builders without a pinned
     extras: ['English working proficiency'],
   };
 
-  for (const builder of [buildClassicDocx, buildModernDocx]) {
+  for (const builder of [buildClassicDocx, buildModernDocx, buildMinimalDocx]) {
     const xml = await docxDocumentXml(await builder(longView, 'AI Product Manager', '32B7A4', 'en'));
     assert.match(xml, /Skill 24/);
     assert.match(xml, /Tool 18/);
@@ -333,4 +352,220 @@ test('document templates: long DOCX facts survive real builders without a pinned
   assert.doesNotMatch(modernXml, /<w:cantSplit\/>/);
   assert.match(modernXml, /<w:tblW w:type="dxa" w:w="10700"\/>/);
   assert.match(modernXml, /<w:gridCol w:w="3317"\/><w:gridCol w:w="7383"\/>/);
+});
+
+test('document templates: realistic long Precision Grid facts remain visible, in bounds, and separated', async () => {
+  const longView = {
+    ...completeView,
+    name: 'Alexandria Chen-Worthington',
+    headline: 'AI Product Manager',
+    location: 'Shanghai',
+    summary: 'Turns complex business problems into shipped products.',
+    skills: Array.from(
+      { length: 24 },
+      (_, index) => `SKILL_${String(index + 1).padStart(2, '0')} Cross-Functional Marketplace Product Strategy and Delivery`,
+    ),
+    tools: Array.from(
+      { length: 18 },
+      (_, index) => `TOOL_${String(index + 1).padStart(2, '0')} Enterprise Analytics and Workflow Platform`,
+    ),
+    experience: Array.from({ length: 8 }, (_, index) => ({
+      company: `International Commerce Company ${index + 1}`,
+      title: `Product Leadership Role ${index + 1}`,
+      period: `20${index} - 20${index + 1}`,
+      bullets: [`Long experience fact ${index + 1}`],
+    })),
+    projects: Array.from({ length: 8 }, (_, index) => ({
+      name: `Marketplace Transformation Project ${index + 1}`,
+      bullets: [`Long project fact ${index + 1}`],
+    })),
+    education: 'BSc in Information Management, Example University',
+    extras: ['English working proficiency'],
+  };
+  const blob = await pdf(React.createElement(ModernPdfDocument, {
+    view: longView,
+    role: 'AI Product Manager',
+    language: 'en',
+  })).toBlob();
+  const loadingTask = getDocument({
+    data: new Uint8Array(await blob.arrayBuffer()),
+    useSystemFonts: true,
+  });
+  const document = await loadingTask.promise;
+  const taggedItems = [];
+  let allText = '';
+
+  for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {
+    const page = await document.getPage(pageNumber);
+    const [left, bottom, right, top] = page.view;
+    const content = await page.getTextContent();
+    allText += content.items.map(({ str }) => str).join(' ');
+    for (const item of content.items) {
+      const x = item.transform[4];
+      const y = item.transform[5];
+      assert.ok(x >= left && y >= bottom);
+      assert.ok(x + item.width <= right + 0.5);
+      assert.ok(y + item.height <= top + 0.5);
+      if (/SKILL_\d{2}|TOOL_\d{2}/.test(item.str)) {
+        taggedItems.push({ ...item, pageNumber, x, y });
+      }
+    }
+  }
+
+  assert.match(allText, /SKILL_24/);
+  assert.match(allText, /TOOL_18/);
+  const skillItems = taggedItems.filter(({ str }) => /SKILL_\d{2}/.test(str));
+  const toolItems = taggedItems.filter(({ str }) => /TOOL_\d{2}/.test(str));
+  assert.equal(skillItems.length, 24);
+  assert.equal(toolItems.length, 18);
+  for (const skill of skillItems) {
+    for (const tool of toolItems.filter(({ pageNumber }) => pageNumber === skill.pageNumber)) {
+      const separatedVertically =
+        skill.y + skill.height <= tool.y ||
+        tool.y + tool.height <= skill.y;
+      const separatedHorizontally =
+        skill.x + skill.width <= tool.x ||
+        tool.x + tool.width <= skill.x;
+      assert.ok(separatedVertically || separatedHorizontally);
+    }
+  }
+  await loadingTask.destroy();
+});
+
+test('document templates: Precision Grid keeps a representative resume on one page', async () => {
+  const view = {
+    ...completeView,
+    name: 'Alex Chen',
+    location: 'Shanghai',
+    summary: 'Turns complex business problems into shipped products.',
+    skills: ['Product Strategy', 'Discovery', 'Roadmapping', 'Experiment Design', 'Stakeholder Alignment', 'AI Product Delivery'],
+    tools: ['Figma', 'SQL', 'Python', 'Jira', 'Amplitude', 'Looker'],
+    experience: [
+      {
+        company: 'Northstar Commerce',
+        title: 'Senior Product Manager',
+        period: '2022 - Present',
+        bullets: [
+          'Led an AI-assisted listing workflow across three marketplaces.',
+          'Aligned operations, engineering, and compliance teams.',
+          'Improved successful first-run completion from 61% to 79%.',
+        ],
+      },
+      {
+        company: 'Harbor Retail Systems',
+        title: 'Product Manager',
+        period: '2019 - 2022',
+        bullets: ['Owned inventory orchestration.', 'Reduced manual reconciliation volume by 31%.'],
+      },
+      {
+        company: 'Atlas Digital',
+        title: 'Business Analyst',
+        period: '2017 - 2019',
+        bullets: ['Translated operator workflows.', 'Built weekly performance reporting.'],
+      },
+    ],
+    projects: [
+      { name: 'Marketplace Copilot', bullets: ['Designed the human-in-the-loop review model.', 'Defined quality gates.'] },
+      { name: 'Inventory Risk Console', bullets: ['Combined demand, inbound, and account health signals.'] },
+    ],
+    education: 'BSc in Information Management, Example University',
+  };
+  const blob = await pdf(React.createElement(ModernPdfDocument, {
+    view,
+    role: 'AI Product Manager',
+    language: 'en',
+  })).toBlob();
+  const loadingTask = getDocument({
+    data: new Uint8Array(await blob.arrayBuffer()),
+    useSystemFonts: true,
+  });
+  const document = await loadingTask.promise;
+
+  assert.equal(document.numPages, 1);
+  await loadingTask.destroy();
+});
+
+test('document templates: Minimal exports every tool fact in PDF and DOCX', async () => {
+  const view = {
+    ...completeView,
+    name: 'Alex Chen',
+    location: 'Shanghai',
+    tools: Array.from({ length: 18 }, (_, index) => `Tool ${index + 1}`),
+  };
+  const pdfBlob = await pdf(React.createElement(MinimalPdfDocument, {
+    view,
+    role: 'AI Product Manager',
+    language: 'en',
+  })).toBlob();
+  const loadingTask = getDocument({
+    data: new Uint8Array(await pdfBlob.arrayBuffer()),
+    useSystemFonts: true,
+  });
+  const document = await loadingTask.promise;
+  let pdfText = '';
+  for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {
+    const page = await document.getPage(pageNumber);
+    const content = await page.getTextContent();
+    pdfText += content.items.map(({ str }) => str).join(' ');
+  }
+  assert.match(pdfText, /Tool 18/);
+  await loadingTask.destroy();
+
+  const docxXml = await docxDocumentXml(
+    await buildMinimalDocx(view, 'AI Product Manager', '32B7A4', 'en'),
+  );
+  assert.match(docxXml, /TOOLS/);
+  assert.match(docxXml, /Tool 18/);
+});
+
+test('document templates: PDF section labels are bilingual across every template', async () => {
+  const cases = [
+    [ClassicPdfDocument, ['PROFILE', 'EXPERIENCE', 'SELECTEDPROJECTS', 'TOOLS'], ['职业摘要', '工作经历', '项目经历', '技能工具']],
+    [ModernPdfDocument, ['CONTACT', 'EXPERIENCE', 'SELECTEDPROJECTS', 'TOOLS'], ['联系方式', '工作经历', '项目经历', '技能工具']],
+    [MinimalPdfDocument, ['EXPERIENCE', 'SELECTEDPROJECTS', 'SKILLS', 'TOOLS'], ['工作经历', '项目经历', '核心能力', '技能工具']],
+  ];
+
+  for (const [Component, expectedEn, expectedZh] of cases) {
+    for (const [language, expected] of [['en', expectedEn], ['zh', expectedZh]]) {
+      const compactText = collectReactText(React.createElement(Component, {
+        view: language === 'en' ? { ...completeView, name: 'Alex Chen' } : completeView,
+        role: language === 'en' ? 'AI Product Manager' : '人工智能产品经理',
+        language,
+      })).replace(/\s+/g, '').toUpperCase();
+      for (const label of expected) assert.match(compactText, new RegExp(label));
+    }
+  }
+});
+
+test('document templates: Modern DOCX has exact page geometry and localized core titles', async () => {
+  const englishBlob = await buildModernDocx(completeView, 'AI Product Manager', '32B7A4', 'en');
+  const chineseBlob = await buildModernDocx(completeView, '人工智能产品经理', '32B7A4', 'zh');
+  const xml = await docxDocumentXml(englishBlob);
+  const layout = xml.match(/<w:tblLayout\b[^>]*\/>/)?.[0] || '';
+  const cellWidths = Array.from(
+    xml.matchAll(/<w:tcW\b[^>]*\/>/g),
+    ([element]) => Number(xmlAttributes(element)['w:w']),
+  );
+  const pageSize = xmlAttributes(xml.match(/<w:pgSz\b[^>]*\/>/)?.[0] || '');
+  const pageMargins = xmlAttributes(xml.match(/<w:pgMar\b[^>]*\/>/)?.[0] || '');
+
+  assert.equal(xmlAttributes(layout)['w:type'], 'fixed');
+  assert.deepEqual(cellWidths, [3317, 7383]);
+  assert.equal(pageSize['w:w'], '11906');
+  assert.equal(pageSize['w:h'], '16838');
+  assert.deepEqual(
+    {
+      top: pageMargins['w:top'],
+      right: pageMargins['w:right'],
+      bottom: pageMargins['w:bottom'],
+      left: pageMargins['w:left'],
+    },
+    { top: '600', right: '600', bottom: '600', left: '600' },
+  );
+  assert.doesNotMatch(xml, /<w:cantSplit(?:\s[^>]*)?(?:\/>|>[\s\S]*?<\/w:cantSplit>)/);
+
+  const englishCore = await docxPart(englishBlob, 'docProps/core.xml');
+  const chineseCore = await docxPart(chineseBlob, 'docProps/core.xml');
+  assert.match(englishCore, /<dc:title>张晨 - Resume<\/dc:title>/);
+  assert.match(chineseCore, /<dc:title>张晨 - 简历<\/dc:title>/);
 });

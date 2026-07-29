@@ -307,9 +307,9 @@ export function ModernPdfDocument({ view, role, accent, language = 'zh' }) {
         wrap
         style={{
           fontFamily: font,
-          paddingTop: 32,
+          paddingTop: 26,
           paddingRight: 30,
-          paddingBottom: 32,
+          paddingBottom: 26,
           paddingLeft: 210,
           fontSize: 9,
           color: '#172033',
@@ -344,36 +344,23 @@ export function ModernPdfDocument({ view, role, accent, language = 'zh' }) {
           >
             <Text style={{ fontSize: 15, fontWeight: 'bold', color: '#FFFFFF' }}>{monogram}</Text>
           </View>
-
-          {contacts.length ? (
-            <>
-              <RailHeading>{labels.contact}</RailHeading>
-              {contacts.map((value) => (
-                <Text key={value} style={precisionStyles.railFact}>{value}</Text>
-              ))}
-            </>
-          ) : null}
-          {view.skills.length ? (
-            <>
-              <RailHeading>{labels.skills}</RailHeading>
-              <RailChips values={view.skills} />
-            </>
-          ) : null}
-          {view.tools.length ? (
-            <>
-              <RailHeading>{labels.tools}</RailHeading>
-              <RailChips values={view.tools} />
-            </>
-          ) : null}
-          {view.education ? (
-            <>
-              <RailHeading>{labels.education}</RailHeading>
-              <Text style={precisionStyles.railFact}>{view.education}</Text>
-            </>
-          ) : null}
+          <View style={{ width: 1, height: 74, marginTop: 12, backgroundColor: PRECISION_ACCENT }} />
+          <Text
+            style={{
+              width: 86,
+              marginTop: 12,
+              fontSize: 7,
+              fontWeight: 'bold',
+              letterSpacing: 1.2,
+              lineHeight: 1.6,
+              color: '#75E6D1',
+            }}
+          >
+            PRECISION{'\n'}GRID
+          </Text>
         </View>
 
-        <Text style={{ fontSize: 24, fontWeight: 'bold', lineHeight: 1.05, color: '#0F1D33' }}>
+        <Text style={{ fontSize: 23, fontWeight: 'bold', lineHeight: 1.05, color: '#0F1D33' }}>
           {view.name}
         </Text>
         <Text
@@ -389,12 +376,18 @@ export function ModernPdfDocument({ view, role, accent, language = 'zh' }) {
           {role || view.headline || ''}
         </Text>
 
+        {contacts.length ? (
+          <>
+            <PrecisionHeading>{labels.contact}</PrecisionHeading>
+            <Text style={precisionStyles.paragraph}>{contacts.join(' | ')}</Text>
+          </>
+        ) : null}
         {view.summary ? (
           <View
             style={{
-              marginTop: 12,
-              marginBottom: 7,
-              paddingVertical: 7,
+              marginTop: 8,
+              marginBottom: 4,
+              paddingVertical: 6,
               paddingHorizontal: 9,
               borderLeft: `2.5pt solid ${PRECISION_ACCENT}`,
               backgroundColor: '#EFF8F6',
@@ -408,6 +401,24 @@ export function ModernPdfDocument({ view, role, accent, language = 'zh' }) {
           <>
             <PrecisionHeading>{labels.objective}</PrecisionHeading>
             <Text style={precisionStyles.paragraph}>{view.jobIntention}</Text>
+          </>
+        ) : null}
+        {view.skills.length ? (
+          <>
+            <PrecisionHeading>{labels.skills}</PrecisionHeading>
+            <PrecisionFactList values={view.skills} chips />
+          </>
+        ) : null}
+        {view.tools.length ? (
+          <>
+            <PrecisionHeading>{labels.tools}</PrecisionHeading>
+            <PrecisionFactList values={view.tools} chips />
+          </>
+        ) : null}
+        {view.education ? (
+          <>
+            <PrecisionHeading>{labels.education}</PrecisionHeading>
+            <PrecisionFactList values={[view.education]} />
           </>
         ) : null}
         {view.experience.length ? (
@@ -437,45 +448,64 @@ export function ModernPdfDocument({ view, role, accent, language = 'zh' }) {
   );
 }
 
-function RailHeading({ children }) {
-  return (
-    <Text
-      style={{
-        marginTop: 12,
-        marginBottom: 5,
-        fontSize: 7.5,
-        fontWeight: 'bold',
-        letterSpacing: 1.1,
-        color: '#75E6D1',
-        textTransform: 'uppercase',
-      }}
-    >
-      {children}
-    </Text>
-  );
-}
+function PrecisionFactList({ values, chips = false }) {
+  if (chips) {
+    const rows = [];
+    values.forEach((value, index) => {
+      if (index % 2 === 0) rows.push([]);
+      rows[rows.length - 1].push({ value, index });
+    });
+    return (
+      <View>
+        {rows.map((row, rowIndex) => (
+          <View
+            key={`fact-row-${rowIndex}`}
+            wrap={false}
+            style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 3 }}
+          >
+            {row.map(({ value, index }) => (
+              <View
+                key={`${value}-${index}`}
+                style={{
+                  width: '48.8%',
+                  paddingVertical: 2,
+                  paddingHorizontal: 6,
+                  border: '0.6pt solid #7CCFC2',
+                  borderRadius: 3,
+                  backgroundColor: '#EFF8F6',
+                }}
+              >
+                <Text style={{ fontSize: 7.3, lineHeight: 1.45, color: '#28534F' }}>{value}</Text>
+              </View>
+            ))}
+          </View>
+        ))}
+      </View>
+    );
+  }
 
-function RailChips({ values }) {
   return (
-    <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
+    <View>
       {values.map((value, index) => (
-        <Text
+        <View
           key={`${value}-${index}`}
+          wrap={false}
           style={{
+            alignSelf: 'flex-start',
             maxWidth: '100%',
-            marginRight: 3,
-            marginBottom: 3,
-            paddingVertical: 2,
-            paddingHorizontal: 4,
-            border: '0.6pt solid #397A77',
-            borderRadius: 2,
-            fontSize: 6.8,
-            color: '#E8F3F1',
-            backgroundColor: '#173B50',
+            marginBottom: 2,
           }}
         >
-          {value}
-        </Text>
+          <Text
+            style={{
+              fontSize: 7.8,
+              lineHeight: 1.45,
+              color: '#45536A',
+            }}
+          >
+            {value}
+          </Text>
+        </View>
       ))}
     </View>
   );
@@ -487,8 +517,8 @@ function PrecisionHeading({ children }) {
       style={{
         flexDirection: 'row',
         alignItems: 'center',
-        marginTop: 10,
-        marginBottom: 5,
+        marginTop: 7,
+        marginBottom: 4,
       }}
       minPresenceAhead={24}
     >
@@ -510,7 +540,7 @@ function PrecisionHeading({ children }) {
 
 function PrecisionItem({ item, project = false }) {
   return (
-    <View style={{ marginBottom: 7 }} wrap={false}>
+    <View style={{ marginBottom: 5 }} wrap={false}>
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' }}>
         <Text style={{ flex: 1, paddingRight: 8, fontSize: 8.5, fontWeight: 'bold', color: '#172033' }}>
           {project ? item.name : item.title}
@@ -535,12 +565,6 @@ function PrecisionItem({ item, project = false }) {
 }
 
 const precisionStyles = StyleSheet.create({
-  railFact: {
-    marginBottom: 3,
-    fontSize: 7.2,
-    lineHeight: 1.5,
-    color: '#D6DFEB',
-  },
   paragraph: {
     marginBottom: 6,
     fontSize: 7.8,
@@ -620,6 +644,12 @@ export function MinimalPdfDocument({ view, role, language = 'zh' }) {
           <>
             <MinimalHeader>{labels.skills}</MinimalHeader>
             <Text style={{ fontSize: 10, lineHeight: 1.5, color: '#374151' }}>{view.skills.join(' | ')}</Text>
+          </>
+        ) : null}
+        {view.tools.length ? (
+          <>
+            <MinimalHeader>{labels.tools}</MinimalHeader>
+            <Text style={{ fontSize: 10, lineHeight: 1.5, color: '#374151' }}>{view.tools.join(' | ')}</Text>
           </>
         ) : null}
         {view.education ? (

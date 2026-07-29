@@ -68,7 +68,7 @@ function makeDocument(view, language, margins, children) {
   const font = fontFor(language);
   return new Document({
     creator: '简历优化大师',
-    title: `${view.name} - Resume`,
+    title: `${view.name} - ${language === 'en' ? 'Resume' : '简历'}`,
     styles: {
       default: {
         document: {
@@ -580,6 +580,15 @@ export async function buildMinimalDocx(view, role, accent, language = 'zh') {
       new Paragraph({
         spacing: { after: 120 },
         children: [new TextRun({ text: view.skills.join(' | '), size: 20, color: '374151', font })],
+      }),
+    );
+  }
+  if (view.tools.length) {
+    children.push(
+      minimalHeading(labels.tools, font),
+      new Paragraph({
+        spacing: { after: 120 },
+        children: [new TextRun({ text: view.tools.join(' | '), size: 20, color: '374151', font })],
       }),
     );
   }
