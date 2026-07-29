@@ -152,7 +152,12 @@ export function ClassicPreview({ view, role, language = 'zh' }) {
       {view.projects.length ? (
         <EditorialSection label={labels.projects}>
           {view.projects.map((item, idx) => (
-            <EditorialItem key={idx} title={item.name} bullets={item.bullets} />
+            <EditorialItem
+              key={idx}
+              title={item.name}
+              meta={item.period}
+              bullets={item.bullets}
+            />
           ))}
         </EditorialSection>
       ) : null}
@@ -363,6 +368,7 @@ export function ModernPreview({ view, role, accent, language = 'zh' }) {
               <PrecisionItem
                 key={idx}
                 title={item.name}
+                period={item.period}
                 bullets={item.bullets}
                 accent={precisionAccent}
               />
@@ -448,6 +454,9 @@ export function MinimalPreview({ view, role, language = 'zh' }) {
           {view.projects.map((item, idx) => (
             <div key={idx} style={{ marginBottom: 10 }}>
               <div style={{ fontSize: 12, color: '#111', fontWeight: 500 }}>{item.name}</div>
+              {item.period ? (
+                <div style={{ fontSize: 9.5, color: '#888', marginTop: 2 }}>{item.period}</div>
+              ) : null}
               <ul style={{ margin: '5px 0 0', paddingLeft: 0, listStyle: 'none' }}>
                 {item.bullets.map((bullet, index) => (
                   <li
@@ -477,10 +486,26 @@ export function MinimalPreview({ view, role, language = 'zh' }) {
         </>
       ) : null}
 
+      {view.tools.length ? (
+        <>
+          <MHeader>{labels.tools}</MHeader>
+          <p style={{ ...paragraph, fontWeight: 300, fontSize: 10 }}>{view.tools.join(' · ')}</p>
+        </>
+      ) : null}
+
       {view.education ? (
         <>
           <MHeader>{labels.education}</MHeader>
           <div style={{ fontSize: 11, color: '#111', fontWeight: 500 }}>{view.education}</div>
+        </>
+      ) : null}
+
+      {view.extras.length ? (
+        <>
+          <MHeader>{labels.extras}</MHeader>
+          <p style={{ ...paragraph, fontWeight: 300, fontSize: 10 }}>
+            {view.extras.join(language === 'en' ? ' · ' : '、')}
+          </p>
         </>
       ) : null}
     </div>

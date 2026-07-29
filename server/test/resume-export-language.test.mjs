@@ -3,8 +3,10 @@ import assert from 'node:assert/strict';
 import { LANGUAGES, TEMPLATES } from '../../src/templates/templateCatalog.js';
 import {
   buildLocalizedAnalysis,
+  createEnglishGenerationKey,
   deriveLocalizedExport,
   createEnglishCacheKey,
+  updateAnalysisLifecycle,
   shouldApplyEnglishResponse,
 } from '../../src/services/resumeExportLanguage.js';
 import { buildFileName } from '../../src/utils/resumeData.js';
@@ -47,6 +49,39 @@ test('cache key includes role and structured resume', () => {
       '产品经理',
     ),
   );
+});
+
+test('a byte-identical new analysis lifecycle gets a fresh English generation key', () => {
+  const firstAnalysis = {
+    finalResume: { basic: ['张晨'], summary: '产品经理' },
+  };
+  const nextAnalysis = {
+    finalResume: { basic: ['张晨'], summary: '产品经理' },
+  };
+  let lifecycle = { analysis: null, generation: 0 };
+
+  lifecycle = updateAnalysisLifecycle(lifecycle, firstAnalysis);
+  const firstGeneration = lifecycle.generation;
+  const contentKey = createEnglishCacheKey(firstAnalysis.finalResume, '产品经理');
+  const firstKey = createEnglishGenerationKey(firstGeneration, contentKey);
+  const cache = new Map([[firstKey, { role: 'Stale Product Manager' }]]);
+
+  const sameLifecycle = updateAnalysisLifecycle(lifecycle, firstAnalysis);
+  assert.equal(sameLifecycle, lifecycle);
+  assert.equal(
+    createEnglishGenerationKey(sameLifecycle.generation, contentKey),
+    firstKey,
+  );
+
+  lifecycle = updateAnalysisLifecycle(lifecycle, nextAnalysis);
+  const nextKey = createEnglishGenerationKey(
+    lifecycle.generation,
+    createEnglishCacheKey(nextAnalysis.finalResume, '产品经理'),
+  );
+
+  assert.notEqual(nextKey, firstKey);
+  assert.equal(cache.get(nextKey), undefined);
+  assert.equal(shouldApplyEnglishResponse(nextKey, firstKey), false);
 });
 
 test('localized analysis swaps only final resume and role', () => {

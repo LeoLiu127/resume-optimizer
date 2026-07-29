@@ -16,6 +16,18 @@ export function createEnglishCacheKey(finalResume, role) {
   return JSON.stringify(sortKeysRecursively({ finalResume, role }));
 }
 
+export function updateAnalysisLifecycle(lifecycle, analysis) {
+  if (lifecycle.analysis === analysis) return lifecycle;
+  return {
+    analysis,
+    generation: lifecycle.generation + 1,
+  };
+}
+
+export function createEnglishGenerationKey(generation, contentKey) {
+  return JSON.stringify([generation, contentKey]);
+}
+
 export function buildLocalizedAnalysis(analysis, englishPayload) {
   return {
     ...analysis,

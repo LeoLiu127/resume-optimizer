@@ -266,7 +266,7 @@ function EditorialItem({ item, font, project = false }) {
         <Text style={{ flex: 1, paddingRight: 7, fontSize: 9.5, fontWeight: 'bold', color: '#1C2534' }}>
           {project ? item.name : item.title}
         </Text>
-        {!project && item.period ? (
+        {item.period ? (
           <Text style={{ fontFamily: font, flexShrink: 0, fontSize: 7, color: '#8B6455' }}>
             {item.period}
           </Text>
@@ -331,6 +331,7 @@ export function ModernPdfDocument({ view, role, accent, language = 'zh' }) {
   const font = fontFor(language);
   const nameFont = fontForText(view.name, font);
   const contacts = [view.phone, view.email, view.location].filter(Boolean);
+  const railCanContainEveryFact = precisionRailFits(view);
   const monogram = monogramForName(view.name);
   const monogramFont = fontForText(monogram, font);
   void accent;
@@ -386,11 +387,13 @@ export function ModernPdfDocument({ view, role, accent, language = 'zh' }) {
               {monogram}
             </Text>
           </View>
-          <View style={{ width: 1, height: 74, marginTop: 12, backgroundColor: PRECISION_ACCENT }} />
+          <View style={{ width: 148, height: 1, marginTop: 10, backgroundColor: PRECISION_ACCENT }} />
           <Text
             style={{
+              position: 'absolute',
+              left: 18,
+              bottom: 28,
               width: 86,
-              marginTop: 12,
               fontSize: 7,
               fontWeight: 'bold',
               letterSpacing: 1.2,
@@ -400,6 +403,48 @@ export function ModernPdfDocument({ view, role, accent, language = 'zh' }) {
           >
             PRECISION{'\n'}GRID
           </Text>
+        </View>
+
+        <View
+          style={{
+            position: 'absolute',
+            left: 18,
+            top: 96,
+            width: 148,
+            color: '#FFFFFF',
+          }}
+        >
+          {railCanContainEveryFact ? (
+            <>
+              {contacts.length ? (
+                <PrecisionRailSection label={labels.contact} values={contacts} />
+              ) : null}
+              {view.skills.length ? (
+                <PrecisionRailSection label={labels.skills} values={view.skills} />
+              ) : null}
+              {view.tools.length ? (
+                <PrecisionRailSection label={labels.tools} values={view.tools} />
+              ) : null}
+              {view.education ? (
+                <PrecisionRailSection label={labels.education} values={[view.education]} />
+              ) : null}
+            </>
+          ) : (
+            <>
+              {contacts.length ? (
+                <PrecisionRailSummary label={labels.contact} count={contacts.length} language={language} />
+              ) : null}
+              {view.skills.length ? (
+                <PrecisionRailSummary label={labels.skills} count={view.skills.length} language={language} />
+              ) : null}
+              {view.tools.length ? (
+                <PrecisionRailSummary label={labels.tools} count={view.tools.length} language={language} />
+              ) : null}
+              {view.education ? (
+                <PrecisionRailSummary label={labels.education} count={1} language={language} />
+              ) : null}
+            </>
+          )}
         </View>
 
         <Text style={{
@@ -424,7 +469,7 @@ export function ModernPdfDocument({ view, role, accent, language = 'zh' }) {
           {role || view.headline || ''}
         </Text>
 
-        {contacts.length ? (
+        {!railCanContainEveryFact && contacts.length ? (
           <>
             <PrecisionHeading>{labels.contact}</PrecisionHeading>
             <Text style={precisionStyles.paragraph}>{contacts.join(' | ')}</Text>
@@ -451,19 +496,19 @@ export function ModernPdfDocument({ view, role, accent, language = 'zh' }) {
             <Text style={precisionStyles.paragraph}>{view.jobIntention}</Text>
           </>
         ) : null}
-        {view.skills.length ? (
+        {!railCanContainEveryFact && view.skills.length ? (
           <>
             <PrecisionHeading>{labels.skills}</PrecisionHeading>
             <PrecisionFactList values={view.skills} chips />
           </>
         ) : null}
-        {view.tools.length ? (
+        {!railCanContainEveryFact && view.tools.length ? (
           <>
             <PrecisionHeading>{labels.tools}</PrecisionHeading>
             <PrecisionFactList values={view.tools} chips />
           </>
         ) : null}
-        {view.education ? (
+        {!railCanContainEveryFact && view.education ? (
           <>
             <PrecisionHeading>{labels.education}</PrecisionHeading>
             <PrecisionFactList values={[view.education]} />
@@ -493,6 +538,86 @@ export function ModernPdfDocument({ view, role, accent, language = 'zh' }) {
         ) : null}
       </Page>
     </Document>
+  );
+}
+
+function precisionRailFits(view) {
+  const contacts = [view.phone, view.email, view.location].filter(Boolean);
+  const sections = [
+    contacts,
+    view.skills || [],
+    view.tools || [],
+    view.education ? [view.education] : [],
+  ].filter((values) => values.length);
+  const estimatedHeight = sections.reduce((height, values) => (
+    height
+      + 18
+      + values.reduce((sectionHeight, value) => (
+        sectionHeight + estimatePrecisionRailLines(value) * 9.5 + 2
+      ), 0)
+  ), 0);
+  return estimatedHeight <= 610;
+}
+
+function estimatePrecisionRailLines(value) {
+  const widthUnits = Array.from(String(value || '')).reduce(
+    (total, character) => total + (/[\u3400-\u9FFF]/.test(character) ? 2 : 1),
+    0,
+  );
+  return Math.max(1, Math.ceil(widthUnits / 29));
+}
+
+function PrecisionRailSection({ label, values }) {
+  return (
+    <View style={{ marginBottom: 10 }}>
+      <Text
+        style={{
+          marginBottom: 5,
+          fontSize: 7.4,
+          fontWeight: 'bold',
+          letterSpacing: 0.8,
+          color: '#75E6D1',
+          textTransform: 'uppercase',
+        }}
+      >
+        {label}
+      </Text>
+      {values.map((value, index) => (
+        <Text
+          key={`${value}-${index}`}
+          style={{
+            marginBottom: 3,
+            fontSize: 7.2,
+            lineHeight: 1.35,
+            color: '#F4F8FC',
+          }}
+        >
+          {value}
+        </Text>
+      ))}
+    </View>
+  );
+}
+
+function PrecisionRailSummary({ label, count, language }) {
+  return (
+    <View style={{ marginBottom: 11 }}>
+      <Text
+        style={{
+          marginBottom: 4,
+          fontSize: 7.4,
+          fontWeight: 'bold',
+          letterSpacing: 0.8,
+          color: '#75E6D1',
+          textTransform: 'uppercase',
+        }}
+      >
+        {label}
+      </Text>
+      <Text style={{ fontSize: 7.2, color: '#F4F8FC' }}>
+        {language === 'en' ? `${count} items` : `${count} 项`}
+      </Text>
+    </View>
   );
 }
 
@@ -593,7 +718,7 @@ function PrecisionItem({ item, project = false }) {
         <Text style={{ flex: 1, paddingRight: 8, fontSize: 8.5, fontWeight: 'bold', color: '#172033' }}>
           {project ? item.name : item.title}
         </Text>
-        {!project && item.period ? (
+        {item.period ? (
           <Text style={{ flexShrink: 0, fontSize: 6.8, color: '#172033' }}>{item.period}</Text>
         ) : null}
       </View>
@@ -681,6 +806,9 @@ export function MinimalPdfDocument({ view, role, language = 'zh' }) {
             {view.projects.map((item, index) => (
               <View key={index} style={{ marginBottom: 8 }} wrap={false}>
                 <Text style={{ fontSize: 11.5, fontWeight: 'bold', color: '#111111' }}>{item.name}</Text>
+                {item.period ? (
+                  <Text style={{ marginTop: 1, fontSize: 9, color: '#888888' }}>{item.period}</Text>
+                ) : null}
                 {item.bullets.map((bullet, bulletIndex) => (
                   <View key={bulletIndex} style={{ flexDirection: 'row', marginTop: 2 }}>
                     <Text style={{ width: 10, color: '#999999' }}>-</Text>

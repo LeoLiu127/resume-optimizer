@@ -18,7 +18,22 @@ const vite = await createServer({
   root: projectRoot,
   configFile: false,
   cacheDir,
-  plugins: [react()],
+  plugins: [
+    {
+      name: 'file-saver-test-boundary',
+      enforce: 'pre',
+      resolveId(id) {
+        return id === 'file-saver' ? '\0file-saver-test-boundary' : null;
+      },
+      load(id) {
+        return id === '\0file-saver-test-boundary'
+          ? 'export const saveAs = () => {}; export default { saveAs };'
+          : null;
+      },
+    },
+    react(),
+  ],
+  ssr: { noExternal: ['file-saver'] },
   server: { middlewareMode: true },
   appType: 'custom',
   logLevel: 'silent',
@@ -38,6 +53,11 @@ const {
   buildModernDocx,
   buildMinimalDocx,
 } = await vite.ssrLoadModule('/src/templates/docx/DocxTemplates.js');
+const {
+  ExportLanguageFeedback,
+  ExportPanel,
+  ExportPreviewPlaceholder,
+} = await vite.ssrLoadModule('/src/components/ExportPanel.jsx');
 
 after(async () => {
   await vite.close();
@@ -62,6 +82,7 @@ const completeView = {
   }],
   projects: [{
     name: '库存管理项目',
+    period: '2023 — 2024',
     bullets: ['设计库存预警流程。'],
   }],
   education: 'XX大学 · 信息管理本科',
@@ -165,6 +186,30 @@ test('preview templates: Minimal preserves its direction while localizing sectio
   assert.match(zh, />项目经历</);
   assert.match(en, />Experience</);
   assert.match(en, />Selected Projects</);
+});
+
+test('preview templates: Minimal renders tools and additional facts with bilingual labels', () => {
+  const view = {
+    ...completeView,
+    tools: ['Figma', 'SQL'],
+    extras: ['Certified Scrum Product Owner'],
+  };
+  const zh = render(MinimalPreview, { view, language: 'zh' });
+  const en = render(MinimalPreview, { view, language: 'en' });
+
+  assert.match(zh, />技能工具</);
+  assert.match(zh, />其他信息</);
+  assert.match(en, />Tools</);
+  assert.match(en, />Additional Information</);
+  assert.match(en, /Figma/);
+  assert.match(en, /SQL/);
+  assert.match(en, /Certified Scrum Product Owner/);
+});
+
+test('preview templates: every template renders project periods', () => {
+  for (const Component of [ClassicPreview, ModernPreview, MinimalPreview]) {
+    assert.match(render(Component, { language: 'en' }), /2023 — 2024/);
+  }
 });
 
 test('preview templates: Modern omits the contact heading when no contact facts exist', () => {
@@ -293,6 +338,38 @@ test('document templates: real PDF generators produce non-truncated multi-page a
     assert.match(renderedText, /Skill 24/);
     if (rendersTools) assert.match(renderedText, /Tool 18/);
     await loadingTask.destroy();
+  }
+});
+
+test('document templates: every PDF template renders project periods', async () => {
+  for (const Component of [ClassicPdfDocument, ModernPdfDocument, MinimalPdfDocument]) {
+    const blob = await pdf(React.createElement(Component, {
+      view: { ...completeView, name: 'Alex Chen' },
+      role: 'AI Product Manager',
+      language: 'en',
+    })).toBlob();
+    const loadingTask = getDocument({
+      data: new Uint8Array(await blob.arrayBuffer()),
+      useSystemFonts: true,
+    });
+    const document = await loadingTask.promise;
+    let text = '';
+    for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {
+      const page = await document.getPage(pageNumber);
+      const content = await page.getTextContent();
+      text += content.items.map(({ str }) => str).join(' ');
+    }
+    assert.match(text, /2023 — 2024/);
+    await loadingTask.destroy();
+  }
+});
+
+test('document templates: every DOCX template renders project periods', async () => {
+  for (const builder of [buildClassicDocx, buildModernDocx, buildMinimalDocx]) {
+    const xml = await docxDocumentXml(
+      await builder(completeView, 'AI Product Manager', '32B7A4', 'en'),
+    );
+    assert.match(xml, /2023 — 2024/);
   }
 });
 
@@ -521,6 +598,7 @@ test('document templates: realistic long Precision Grid facts remain visible, in
   });
   const document = await loadingTask.promise;
   const taggedItems = [];
+  const railItems = [];
   let allText = '';
 
   for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {
@@ -537,6 +615,7 @@ test('document templates: realistic long Precision Grid facts remain visible, in
       if (/SKILL_\d{2}|TOOL_\d{2}/.test(item.str)) {
         taggedItems.push({ ...item, pageNumber, x, y });
       }
+      if (x < 184) railItems.push({ ...item, pageNumber, x, y });
     }
   }
 
@@ -546,6 +625,10 @@ test('document templates: realistic long Precision Grid facts remain visible, in
   const toolItems = taggedItems.filter(({ str }) => /TOOL_\d{2}/.test(str));
   assert.equal(skillItems.length, 24);
   assert.equal(toolItems.length, 18);
+  assert.ok(skillItems.every(({ x }) => x >= 200));
+  assert.ok(toolItems.every(({ x }) => x >= 200));
+  assert.ok(railItems.some(({ str }) => /24 items/.test(str)));
+  assert.ok(railItems.some(({ str }) => /18 items/.test(str)));
   for (const skill of skillItems) {
     for (const tool of toolItems.filter(({ pageNumber }) => pageNumber === skill.pageNumber)) {
       const separatedVertically =
@@ -610,7 +693,68 @@ test('document templates: Precision Grid keeps a representative resume on one pa
   const document = await loadingTask.promise;
 
   assert.equal(document.numPages, 1);
+  const page = await document.getPage(1);
+  const content = await page.getTextContent();
+  const railFacts = [
+    'zhangchen@example.com',
+    'Product Strategy',
+    'Figma',
+  ];
+  for (const fact of railFacts) {
+    const item = content.items.find(({ str }) => str.includes(fact));
+    assert.ok(item, `missing Precision rail fact: ${fact}`);
+    assert.ok(item.transform[4] < 184, `${fact} must render in the 31% information rail`);
+  }
+  const railText = content.items
+    .filter((item) => item.transform[4] < 184)
+    .map(({ str }) => str)
+    .join(' ');
+  assert.match(railText, /BSc in Information Management, Example University/);
   await loadingTask.destroy();
+});
+
+test('export panel: filename hint and selection semantics use the real export contract', () => {
+  const markup = renderToStaticMarkup(React.createElement(ExportPanel, {
+    analysis: {
+      summary: { role: 'AI: Product? Manager' },
+      finalResume: {
+        basic: ['Alex / Chen', 'AI Product Manager'],
+        jobIntention: '',
+        summary: '',
+        skills: [],
+        tools: [],
+        experience: [],
+        projects: [],
+        education: '',
+        extras: [],
+      },
+    },
+    role: 'AI: Product? Manager',
+  }));
+
+  assert.match(markup, /role="group" aria-label="选择模板"/);
+  assert.match(markup, /role="group" aria-label="导出格式"/);
+  assert.match(markup, /Alex_Chen_AI_Product_Manager_Editorial_ZH\.pdf/);
+  assert.equal((markup.match(/aria-pressed="true"/g) || []).length, 3);
+});
+
+test('export panel: English feedback exposes one live region and one retry action', () => {
+  const markup = renderToStaticMarkup(React.createElement(React.Fragment, null,
+    React.createElement(ExportLanguageFeedback, {
+      language: 'en',
+      state: 'error',
+      error: '英文简历生成失败',
+      onRetry: () => {},
+    }),
+    React.createElement(ExportPreviewPlaceholder, {
+      language: 'en',
+      state: 'error',
+    }),
+  ));
+
+  assert.equal((markup.match(/role="alert"/g) || []).length, 1);
+  assert.equal((markup.match(/<button/g) || []).length, 1);
+  assert.equal((markup.match(/英文简历生成失败/g) || []).length, 1);
 });
 
 test('document templates: Minimal exports every tool fact in PDF and DOCX', async () => {

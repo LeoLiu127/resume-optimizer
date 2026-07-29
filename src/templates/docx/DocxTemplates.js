@@ -294,7 +294,7 @@ function editorialItemContent(item, font, project = false) {
           color: '1C2534',
           font,
         }),
-        ...(!project && item.period
+        ...(item.period
           ? [
               new TextRun({ text: '    ', size: 15, font }),
               new TextRun({ text: item.period, size: 15, color: '8B6455', font }),
@@ -527,7 +527,7 @@ function precisionItemContent(item, font, project = false) {
           color: '172033',
           font,
         }),
-        ...(!project && item.period
+        ...(item.period
           ? [
               new TextRun({ text: '    ', size: 14, font }),
               new TextRun({ text: item.period, size: 14, color: '172033', font }),
@@ -611,11 +611,18 @@ export async function buildMinimalDocx(view, role, accent, language = 'zh') {
     children.push(minimalHeading(labels.projects, font));
     view.projects.forEach((item) => {
       children.push(new Paragraph({
-        keepNext: item.bullets.length > 0,
+        keepNext: true,
         keepLines: true,
         spacing: { before: 100, after: 40 },
         children: [new TextRun({ text: item.name, size: 22, color: '111111', font })],
       }));
+      if (item.period) {
+        children.push(new Paragraph({
+          keepNext: item.bullets.length > 0,
+          spacing: { after: 60 },
+          children: [new TextRun({ text: item.period, size: 18, color: '888888', font })],
+        }));
+      }
       item.bullets.forEach((bullet) => children.push(minimalBullet(bullet, font)));
     });
   }
