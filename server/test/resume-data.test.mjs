@@ -39,6 +39,38 @@ test('English basic fields parse labeled contact facts without treating location
   assert.equal(view.location, 'Shanghai, China');
 });
 
+test('English phone label variants are recognized and stripped from the normalized phone', () => {
+  const cases = [
+    ['Phone', '+86 138 0000 0000'],
+    ['Tel', '+44 20 7946 0958'],
+    ['Telephone', '+1 (415) 555-0100'],
+    ['Mobile', '+61 412 345 678'],
+  ];
+
+  for (const [label, expectedPhone] of cases) {
+    const view = buildResumeView(analysisWithBasic([
+      'Alex Chen',
+      'AI Product Manager',
+      `${label}: ${expectedPhone}`,
+      'Location: Shanghai, China',
+    ]));
+
+    assert.equal(view.phone, expectedPhone, `${label}: must be parsed as a phone fact`);
+    assert.equal(view.headline, 'AI Product Manager');
+  }
+});
+
+test('E-mail label is recognized and stripped from the normalized email', () => {
+  const view = buildResumeView(analysisWithBasic([
+    'Alex Chen',
+    'AI Product Manager',
+    'E-mail: alex.chen@example.com',
+  ]));
+
+  assert.equal(view.email, 'alex.chen@example.com');
+  assert.equal(view.headline, 'AI Product Manager');
+});
+
 test('Chinese basic field parsing remains compatible', () => {
   const view = buildResumeView(analysisWithBasic([
     '张晨',

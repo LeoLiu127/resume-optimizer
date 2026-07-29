@@ -1,5 +1,9 @@
 import { TEMPLATES } from '../templates/templateCatalog.js';
 
+const EMAIL_LABEL_PREFIX = /^(?:邮箱|e-?mail)\s*[:：]\s*/i;
+const PHONE_LABEL_PREFIX = /^(?:电话|phone|tel(?:ephone)?|mobile)\s*[:：]\s*/i;
+const LOCATION_LABEL_PREFIX = /^(?:所在地|location)\s*[:：]\s*/i;
+
 /**
  * 把 analysis.finalResume 归一化成所有模板都能消费的标准化数据
  */
@@ -11,19 +15,21 @@ export function buildResumeView(analysis, variant = 'balanced') {
   const name = basic[0] || '候选人';
   // 联系方式行通常在 basic[1..] 中，按模式挑出邮箱/电话/位置
   const contactLines = basic.slice(1);
-  const emailLine = contactLines.find((line) => /[\w.+-]+@[\w-]+\.[\w.-]+/.test(line)) || '';
-  const email = emailLine.replace(/^(?:邮箱|email)\s*[:：]\s*/i, '');
-  const phoneLine = contactLines.find((line) => /^(?:电话|phone)\s*[:：]/i.test(line))
+  const emailLine = contactLines.find((line) => EMAIL_LABEL_PREFIX.test(line))
+    || contactLines.find((line) => /[\w.+-]+@[\w-]+\.[\w.-]+/.test(line))
+    || '';
+  const email = emailLine.replace(EMAIL_LABEL_PREFIX, '');
+  const phoneLine = contactLines.find((line) => PHONE_LABEL_PREFIX.test(line))
     || contactLines.find((line) => {
       const digits = String(line).match(/\d/g)?.length || 0;
       return digits >= 7 && /^[+\d\s().-]+$/.test(String(line).trim());
     })
     || '';
-  const phone = phoneLine.replace(/^(?:电话|phone)\s*[:：]\s*/i, '');
+  const phone = phoneLine.replace(PHONE_LABEL_PREFIX, '');
   const locationLine = contactLines.find((line) =>
-    /^(?:所在地|location)\s*[:：]/i.test(line) || /(北京|上海|广州|深圳|杭州|成都|武汉|南京|苏州|西安|重庆|天津|厦门|青岛|远程|香港|台北)/.test(line),
+    LOCATION_LABEL_PREFIX.test(line) || /(北京|上海|广州|深圳|杭州|成都|武汉|南京|苏州|西安|重庆|天津|厦门|青岛|远程|香港|台北)/.test(line),
   ) || '';
-  const location = locationLine.replace(/^(?:所在地|location)\s*[:：]\s*/i, '');
+  const location = locationLine.replace(LOCATION_LABEL_PREFIX, '');
   const headline = contactLines.find(
     (line) => line !== emailLine
       && line !== phoneLine
