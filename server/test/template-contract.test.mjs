@@ -89,6 +89,15 @@ function collectReactText(node) {
   return collectReactText(node.props.children);
 }
 
+function collectReactStrings(node) {
+  if (node === null || node === undefined || typeof node === 'boolean') return [];
+  if (typeof node === 'string' || typeof node === 'number') return [String(node)];
+  if (Array.isArray(node)) return node.flatMap(collectReactStrings);
+  if (!React.isValidElement(node)) return [];
+  if (typeof node.type === 'function') return collectReactStrings(node.type(node.props));
+  return collectReactStrings(node.props.children);
+}
+
 async function docxDocumentXml(blob) {
   return docxPart(blob, 'word/document.xml');
 }
@@ -102,6 +111,13 @@ function xmlAttributes(element) {
   return Object.fromEntries(
     Array.from(element.matchAll(/\b([\w:]+)="([^"]*)"/g), ([, name, value]) => [name, value]),
   );
+}
+
+function xmlRunContaining(xml, text) {
+  return Array.from(
+    xml.matchAll(/<w:r(?:\s[^>]*)?>[\s\S]*?<\/w:r>/g),
+    ([run]) => run,
+  ).find((run) => run.includes(`>${text}</w:t>`)) || '';
 }
 
 test('preview templates: export real renderable components', () => {
@@ -316,6 +332,70 @@ test('document templates: Minimal PDF keeps the role line clear of the candidate
   await loadingTask.destroy();
 });
 
+test('document templates: English PDFs preserve a Chinese candidate name as selectable text', async () => {
+  const view = {
+    ...completeView,
+    name: '陈晓 (Alex Chen)',
+    headline: 'AI Product Manager',
+    location: 'Shanghai, China',
+    jobIntention: 'AI Product Manager',
+    summary: 'Turns complex business problems into shipped products.',
+  };
+
+  for (const Component of [ClassicPdfDocument, ModernPdfDocument, MinimalPdfDocument]) {
+    const blob = await pdf(React.createElement(Component, {
+      view,
+      role: 'AI Product Manager',
+      language: 'en',
+    })).toBlob();
+    const loadingTask = getDocument({
+      data: new Uint8Array(await blob.arrayBuffer()),
+      useSystemFonts: true,
+    });
+    const document = await loadingTask.promise;
+    const page = await document.getPage(1);
+    const content = await page.getTextContent();
+    const renderedText = content.items.map(({ str }) => str).join(' ');
+
+    assert.match(renderedText, /陈晓 \(Alex Chen\)/);
+    await loadingTask.destroy();
+  }
+});
+
+test('document templates: Precision Grid PDF derives a Latin monogram from a mixed-script name', () => {
+  const view = {
+    ...completeView,
+    name: '陈晓 (Alex Chen)',
+    headline: 'AI Product Manager',
+  };
+  const strings = collectReactStrings(React.createElement(ModernPdfDocument, {
+    view,
+    role: 'AI Product Manager',
+    language: 'en',
+  }));
+
+  assert.ok(strings.includes('AC'));
+});
+
+test('document templates: English DOCX names declare a CJK-safe East Asian font', async () => {
+  const view = {
+    ...completeView,
+    name: '陈晓 (Alex Chen)',
+    headline: 'AI Product Manager',
+  };
+
+  for (const builder of [buildClassicDocx, buildModernDocx, buildMinimalDocx]) {
+    const xml = await docxDocumentXml(
+      await builder(view, 'AI Product Manager', '32B7A4', 'en'),
+    );
+    const nameRun = xmlRunContaining(xml, '陈晓 (Alex Chen)');
+
+    assert.match(nameRun, /w:ascii="Arial"/);
+    assert.match(nameRun, /w:hAnsi="Arial"/);
+    assert.match(nameRun, /w:eastAsia="Microsoft YaHei"/);
+  }
+});
+
 test('document templates: long DOCX facts survive real builders without a pinned Modern page row', async () => {
   const longView = {
     ...completeView,
@@ -516,6 +596,41 @@ test('document templates: Minimal exports every tool fact in PDF and DOCX', asyn
   );
   assert.match(docxXml, /TOOLS/);
   assert.match(docxXml, /Tool 18/);
+});
+
+test('document templates: Minimal exports every additional information fact in PDF and DOCX', async () => {
+  const view = {
+    ...completeView,
+    name: 'Alex Chen',
+    location: 'Shanghai',
+    extras: ['English and Mandarin working proficiency', 'Certified Scrum Product Owner'],
+  };
+  const pdfBlob = await pdf(React.createElement(MinimalPdfDocument, {
+    view,
+    role: 'AI Product Manager',
+    language: 'en',
+  })).toBlob();
+  const loadingTask = getDocument({
+    data: new Uint8Array(await pdfBlob.arrayBuffer()),
+    useSystemFonts: true,
+  });
+  const document = await loadingTask.promise;
+  let pdfText = '';
+  for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {
+    const page = await document.getPage(pageNumber);
+    const content = await page.getTextContent();
+    pdfText += content.items.map(({ str }) => str).join(' ');
+  }
+  assert.match(pdfText, /English and Mandarin working proficiency/);
+  assert.match(pdfText, /Certified Scrum Product Owner/);
+  await loadingTask.destroy();
+
+  const docxXml = await docxDocumentXml(
+    await buildMinimalDocx(view, 'AI Product Manager', '32B7A4', 'en'),
+  );
+  assert.match(docxXml, /ADDITIONAL INFORMATION/);
+  assert.match(docxXml, /English and Mandarin working proficiency/);
+  assert.match(docxXml, /Certified Scrum Product Owner/);
 });
 
 test('document templates: PDF section labels are bilingual across every template', async () => {

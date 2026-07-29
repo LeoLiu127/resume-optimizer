@@ -56,6 +56,19 @@ function serifFor(language) {
   return language === 'en' ? FONT_SERIF_EN : FONT_CN;
 }
 
+function fontForText(value, fallback) {
+  return /[\u3400-\u9FFF]/.test(String(value || '')) ? FONT_CN : fallback;
+}
+
+function monogramForName(value) {
+  const name = String(value || 'CV');
+  const latinWords = name.match(/[A-Za-z]+/g) || [];
+  if (latinWords.length) {
+    return latinWords.slice(0, 2).map((word) => word[0]).join('').toUpperCase();
+  }
+  return name.replace(/\s/g, '').slice(0, 2).toUpperCase();
+}
+
 function joinFacts(values, language) {
   return values.join(language === 'en' ? ' | ' : '、');
 }
@@ -67,6 +80,7 @@ export function ClassicPdfDocument({ view, role, language = 'zh' }) {
   const labels = labelsFor(language);
   const font = fontFor(language);
   const serif = serifFor(language);
+  const nameFont = fontForText(view.name, serif);
   const contacts = [view.phone, view.email, view.location].filter(Boolean);
 
   return (
@@ -95,7 +109,9 @@ export function ClassicPdfDocument({ view, role, language = 'zh' }) {
           wrap={false}
         >
           <View style={{ width: '55%' }}>
-            <Text style={{ fontSize: 24, lineHeight: 1, color: '#141B27' }}>{view.name}</Text>
+            <Text style={{ fontFamily: nameFont, fontSize: 24, lineHeight: 1, color: '#141B27' }}>
+              {view.name}
+            </Text>
             <Text
               style={{
                 marginTop: 6,
@@ -296,8 +312,10 @@ const editorialStyles = StyleSheet.create({
 export function ModernPdfDocument({ view, role, accent, language = 'zh' }) {
   const labels = labelsFor(language);
   const font = fontFor(language);
+  const nameFont = fontForText(view.name, font);
   const contacts = [view.phone, view.email, view.location].filter(Boolean);
-  const monogram = String(view.name || 'CV').replace(/\s/g, '').slice(0, 2).toUpperCase();
+  const monogram = monogramForName(view.name);
+  const monogramFont = fontForText(monogram, font);
   void accent;
 
   return (
@@ -342,7 +360,14 @@ export function ModernPdfDocument({ view, role, accent, language = 'zh' }) {
               marginBottom: 15,
             }}
           >
-            <Text style={{ fontSize: 15, fontWeight: 'bold', color: '#FFFFFF' }}>{monogram}</Text>
+            <Text style={{
+              fontFamily: monogramFont,
+              fontSize: 15,
+              fontWeight: 'bold',
+              color: '#FFFFFF',
+            }}>
+              {monogram}
+            </Text>
           </View>
           <View style={{ width: 1, height: 74, marginTop: 12, backgroundColor: PRECISION_ACCENT }} />
           <Text
@@ -360,7 +385,13 @@ export function ModernPdfDocument({ view, role, accent, language = 'zh' }) {
           </Text>
         </View>
 
-        <Text style={{ fontSize: 23, fontWeight: 'bold', lineHeight: 1.05, color: '#0F1D33' }}>
+        <Text style={{
+          fontFamily: nameFont,
+          fontSize: 23,
+          fontWeight: 'bold',
+          lineHeight: 1.05,
+          color: '#0F1D33',
+        }}>
           {view.name}
         </Text>
         <Text
@@ -579,6 +610,7 @@ const precisionStyles = StyleSheet.create({
 export function MinimalPdfDocument({ view, role, language = 'zh' }) {
   const labels = labelsFor(language);
   const font = fontFor(language);
+  const nameFont = fontForText(view.name, font);
 
   return (
     <Document>
@@ -595,7 +627,9 @@ export function MinimalPdfDocument({ view, role, language = 'zh' }) {
           lineHeight: 1.5,
         }}
       >
-        <Text style={{ fontSize: 26, fontWeight: 300, color: '#111111' }}>{view.name}</Text>
+        <Text style={{ fontFamily: nameFont, fontSize: 26, fontWeight: 300, color: '#111111' }}>
+          {view.name}
+        </Text>
         <Text style={{ marginTop: 20, fontSize: 9, color: '#888888' }}>
           {[role, view.location].filter(Boolean).join(' | ')}
         </Text>
@@ -656,6 +690,14 @@ export function MinimalPdfDocument({ view, role, language = 'zh' }) {
           <>
             <MinimalHeader>{labels.education}</MinimalHeader>
             <Text style={{ fontSize: 10.5, fontWeight: 'bold', color: '#111111' }}>{view.education}</Text>
+          </>
+        ) : null}
+        {view.extras.length ? (
+          <>
+            <MinimalHeader>{labels.extras}</MinimalHeader>
+            <Text style={{ fontSize: 10, lineHeight: 1.5, color: '#374151' }}>
+              {joinFacts(view.extras, language)}
+            </Text>
           </>
         ) : null}
       </Page>

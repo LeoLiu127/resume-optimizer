@@ -60,6 +60,25 @@ function fontFor(language) {
   return language === 'en' ? FONT_EN : FONT_CN;
 }
 
+function fontForText(value, fallback) {
+  if (!/[\u3400-\u9FFF]/.test(String(value || ''))) return fallback;
+  return {
+    ascii: fallback,
+    hAnsi: fallback,
+    eastAsia: FONT_CN,
+    cs: fallback,
+  };
+}
+
+function monogramForName(value) {
+  const name = String(value || 'CV');
+  const latinWords = name.match(/[A-Za-z]+/g) || [];
+  if (latinWords.length) {
+    return latinWords.slice(0, 2).map((word) => word[0]).join('').toUpperCase();
+  }
+  return name.replace(/\s/g, '').slice(0, 2).toUpperCase();
+}
+
 function joinFacts(values, language) {
   return values.join(language === 'en' ? ' | ' : '、');
 }
@@ -95,6 +114,7 @@ function makeDocument(view, language, margins, children) {
 export async function buildClassicDocx(view, role, accent, language = 'zh') {
   const labels = labelsFor(language);
   const font = fontFor(language);
+  const nameFont = fontForText(view.name, font);
   const contacts = [view.phone, view.email, view.location].filter(Boolean);
   void accent;
 
@@ -114,7 +134,12 @@ export async function buildClassicDocx(view, role, accent, language = 'zh') {
             children: [
               new Paragraph({
                 spacing: { after: 70 },
-                children: [new TextRun({ text: view.name, size: 46, color: '141B27', font })],
+                children: [new TextRun({
+                  text: view.name,
+                  size: 46,
+                  color: '141B27',
+                  font: nameFont,
+                })],
               }),
               new Paragraph({
                 spacing: { after: 0 },
@@ -310,15 +335,23 @@ function tagParagraph(values, font) {
 export async function buildModernDocx(view, role, accent, language = 'zh') {
   const labels = labelsFor(language);
   const font = fontFor(language);
+  const nameFont = fontForText(view.name, font);
   const contacts = [view.phone, view.email, view.location].filter(Boolean);
-  const monogram = String(view.name || 'CV').replace(/\s/g, '').slice(0, 2).toUpperCase();
+  const monogram = monogramForName(view.name);
+  const monogramFont = fontForText(monogram, font);
   void accent;
 
   const leftChildren = [
     new Paragraph({
       spacing: { after: 220 },
       children: [
-        new TextRun({ text: monogram, bold: true, size: 28, color: 'FFFFFF', font }),
+        new TextRun({
+          text: monogram,
+          bold: true,
+          size: 28,
+          color: 'FFFFFF',
+          font: monogramFont,
+        }),
       ],
     }),
   ];
@@ -343,7 +376,13 @@ export async function buildModernDocx(view, role, accent, language = 'zh') {
     new Paragraph({
       keepNext: true,
       spacing: { after: 60 },
-      children: [new TextRun({ text: view.name, bold: true, size: 44, color: '0F1D33', font })],
+      children: [new TextRun({
+        text: view.name,
+        bold: true,
+        size: 44,
+        color: '0F1D33',
+        font: nameFont,
+      })],
     }),
     new Paragraph({
       keepNext: Boolean(view.summary),
@@ -514,11 +553,17 @@ function precisionItemContent(item, font, project = false) {
 export async function buildMinimalDocx(view, role, accent, language = 'zh') {
   const labels = labelsFor(language);
   const font = fontFor(language);
+  const nameFont = fontForText(view.name, font);
   const children = [
     new Paragraph({
       keepNext: true,
       spacing: { after: 80 },
-      children: [new TextRun({ text: view.name, size: 52, color: '111111', font })],
+      children: [new TextRun({
+        text: view.name,
+        size: 52,
+        color: '111111',
+        font: nameFont,
+      })],
     }),
     new Paragraph({
       keepNext: Boolean(view.summary),
@@ -598,6 +643,20 @@ export async function buildMinimalDocx(view, role, accent, language = 'zh') {
       new Paragraph({
         spacing: { after: 120 },
         children: [new TextRun({ text: view.education, size: 22, color: '111111', font })],
+      }),
+    );
+  }
+  if (view.extras.length) {
+    children.push(
+      minimalHeading(labels.extras, font),
+      new Paragraph({
+        spacing: { after: 120 },
+        children: [new TextRun({
+          text: joinFacts(view.extras, language),
+          size: 20,
+          color: '374151',
+          font,
+        })],
       }),
     );
   }
