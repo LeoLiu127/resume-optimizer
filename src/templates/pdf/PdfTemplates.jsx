@@ -1,14 +1,31 @@
 import React from 'react';
 import { Document, Page, View, Text, StyleSheet, Font } from '@react-pdf/renderer';
 
+const notoSansScRegularUrl = new URL(
+  '../../assets/fonts/NotoSansSC-Regular.otf',
+  import.meta.url,
+).href;
+const notoSansScBoldUrl = new URL(
+  '../../assets/fonts/NotoSansSC-Bold.otf',
+  import.meta.url,
+).href;
+
+function bundledFontSource(filename, browserUrl) {
+  if (typeof window !== 'undefined') return browserUrl;
+  const relativePath = ['..', '..', 'assets', 'fonts', filename].join('/');
+  const fileUrl = new URL(relativePath, import.meta.url);
+  const pathname = decodeURIComponent(fileUrl.pathname);
+  return /^\/[A-Za-z]:\//.test(pathname) ? pathname.slice(1) : pathname;
+}
+
 Font.register({
   family: 'NotoSansSC',
-  src: 'https://cdn.jsdelivr.net/gh/notofonts/noto-cjk@main/Sans/OTF/SimplifiedChinese/NotoSansCJKsc-Regular.otf',
+  src: bundledFontSource('NotoSansSC-Regular.otf', notoSansScRegularUrl),
   fontStyle: 'normal',
 });
 Font.register({
   family: 'NotoSansSC',
-  src: 'https://cdn.jsdelivr.net/gh/notofonts/noto-cjk@main/Sans/OTF/SimplifiedChinese/NotoSansCJKsc-Bold.otf',
+  src: bundledFontSource('NotoSansSC-Bold.otf', notoSansScBoldUrl),
   fontStyle: 'bold',
 });
 Font.registerHyphenationCallback((word) => [word]);

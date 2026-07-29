@@ -396,6 +396,54 @@ test('document templates: English DOCX names declare a CJK-safe East Asian font'
   }
 });
 
+test('document templates: Precision Grid DOCX derives a Latin monogram from a mixed-script name', async () => {
+  const xml = await docxDocumentXml(await buildModernDocx({
+    ...completeView,
+    name: '陈晓 (Alex Chen)',
+    headline: 'AI Product Manager',
+  }, 'AI Product Manager', '32B7A4', 'en'));
+
+  assert.match(xml, /<w:t(?:\s[^>]*)?>AC<\/w:t>/);
+});
+
+test('document templates: English DOCX body remains English when the candidate name is mixed-script', async () => {
+  const view = {
+    name: '陈晓 (Alex Chen)',
+    headline: 'AI Product Manager',
+    email: 'alex.chen@example.com',
+    phone: '+86 138 0000 0000',
+    location: 'Shanghai, China',
+    jobIntention: 'AI Product Manager - Cross-border Commerce',
+    summary: 'Turns complex business problems into shipped products.',
+    skills: ['Product Strategy', 'Discovery'],
+    tools: ['Figma', 'SQL'],
+    experience: [{
+      company: 'Northstar Commerce',
+      title: 'Senior Product Manager',
+      period: '2022 - Present',
+      bullets: ['Led an AI-assisted listing workflow.'],
+    }],
+    projects: [{
+      name: 'Marketplace Copilot',
+      bullets: ['Designed a human-in-the-loop review model.'],
+    }],
+    education: 'BSc, Information Management - Example University',
+    extras: ['Certified Scrum Product Owner'],
+  };
+
+  for (const builder of [buildClassicDocx, buildModernDocx, buildMinimalDocx]) {
+    const xml = await docxDocumentXml(
+      await builder(view, 'AI Product Manager', '32B7A4', 'en'),
+    );
+    const text = Array.from(
+      xml.matchAll(/<w:t(?:\s[^>]*)?>([\s\S]*?)<\/w:t>/g),
+      ([, value]) => value,
+    ).join(' ');
+
+    assert.doesNotMatch(text.replaceAll('陈晓 (Alex Chen)', ''), /[\u3400-\u9FFF]/);
+  }
+});
+
 test('document templates: long DOCX facts survive real builders without a pinned Modern page row', async () => {
   const longView = {
     ...completeView,
