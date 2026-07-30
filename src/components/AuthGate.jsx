@@ -13,7 +13,10 @@ import {
   Check,
 } from 'lucide-react';
 import { auth, getStoredUser, apiConfig } from '../services/api';
-import { isFirstUserRegistration } from '../services/registrationPolicy';
+import {
+  isFirstUserRegistration,
+  markBootstrapAsHavingUsers,
+} from '../services/registrationPolicy';
 
 const TABS = { REGISTER: 'register', LOGIN: 'login' };
 const PASSWORD_MIN = 8;
@@ -225,6 +228,9 @@ export function AuthGate({ children }) {
             })
           : await auth.login({ displayName: displayName.trim(), password });
 
+      if (tab === TABS.REGISTER) {
+        setBootstrap((currentBootstrap) => markBootstrapAsHavingUsers(currentBootstrap));
+      }
       setUser(data.user);
       setAuthed(true);
       setCode('');
