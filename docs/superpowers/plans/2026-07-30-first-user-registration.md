@@ -147,4 +147,3 @@ Expected: Vite exits `0`.
 git add docs/superpowers/specs/2026-07-30-first-user-registration-design.md docs/superpowers/plans/2026-07-30-first-user-registration.md server/src/routes/auth.js src/components/AuthGate.jsx src/services/registrationPolicy.js server/test/auth-registration.test.mjs server/test/registration-policy.test.mjs
 git commit -m "fix: allow first user registration without invite"
 ```
-
