@@ -13,6 +13,7 @@ import {
   Check,
 } from 'lucide-react';
 import { auth, getStoredUser, apiConfig } from '../services/api';
+import { isFirstUserRegistration } from '../services/registrationPolicy';
 
 const TABS = { REGISTER: 'register', LOGIN: 'login' };
 const PASSWORD_MIN = 8;
@@ -170,6 +171,7 @@ export function AuthGate({ children }) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [bootstrap, setBootstrap] = useState(null);
+  const firstUserRegistration = isFirstUserRegistration(bootstrap);
   // 修改密码弹窗
   const [changePwOpen, setChangePwOpen] = useState(false);
   const [changePwToast, setChangePwToast] = useState('');
@@ -204,7 +206,7 @@ export function AuthGate({ children }) {
     setError('');
 
     if (tab === TABS.REGISTER) {
-      if (!code.trim()) return setError('请输入邀请码');
+      if (!firstUserRegistration && !code.trim()) return setError('请输入邀请码');
       if (!displayName.trim()) return setError('请填写昵称');
       if (password.length < 8) return setError('密码至少 8 位');
     } else {
@@ -256,7 +258,6 @@ export function AuthGate({ children }) {
   };
 
   if (!authed) {
-    const noUsersYet = bootstrap && !bootstrap.hasUsers;
     return (
       <div className="auth-gate">
         <form className="auth-card" onSubmit={handleSubmit}>
@@ -265,7 +266,7 @@ export function AuthGate({ children }) {
           </div>
           <h1 className="auth-title">简历优化大师</h1>
           <p className="auth-subtitle">
-            {noUsersYet
+            {firstUserRegistration
               ? '欢迎第一位用户：你将自动成为管理员。'
               : '朋友分享的简历优化工具。首次使用请注册，已有账号直接登录。'}
           </p>
@@ -287,7 +288,7 @@ export function AuthGate({ children }) {
             </button>
           </div>
 
-          {tab === TABS.REGISTER ? (
+          {tab === TABS.REGISTER && !firstUserRegistration ? (
             <label className="field">
               <span>邀请码</span>
               <input
@@ -349,11 +350,15 @@ export function AuthGate({ children }) {
           <div className="auth-footer">
             <p>
               {tab === TABS.REGISTER ? (
-                <>
-                  还没有邀请码？联系开通者获取。
-                  <br />
-                  第一个注册的账号会自动成为管理员。
-                </>
+                firstUserRegistration ? (
+                  <>首位用户免邀请码，将自动成为管理员。</>
+                ) : (
+                  <>
+                    还没有邀请码？联系开通者获取。
+                    <br />
+                    第一个注册的账号会自动成为管理员。
+                  </>
+                )
               ) : (
                 <>忘记密码？联系管理员重置。</>
               )}

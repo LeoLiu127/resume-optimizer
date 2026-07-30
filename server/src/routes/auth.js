@@ -63,9 +63,6 @@ function createSessionAndRespond(userId, res, inviteCodeId = null) {
  */
 function handleRegister(req, res) {
   const { code, displayName, password } = req.body || {};
-  if (!code || typeof code !== 'string') {
-    return res.status(400).json({ error: '请提供邀请码' });
-  }
   if (!displayName || typeof displayName !== 'string' || !displayName.trim()) {
     return res.status(400).json({ error: '请填写昵称' });
   }
@@ -73,22 +70,29 @@ function handleRegister(req, res) {
     return res.status(400).json({ error: `密码至少 ${PASSWORD_MIN} 位` });
   }
 
-  const cleanCode = code.trim().toUpperCase();
   const cleanName = displayName.trim().slice(0, 32);
   const db = getDb();
+  const userCount = db.prepare('SELECT COUNT(*) AS c FROM users').get().c;
 
-  const invite = db
-    .prepare(
-      'SELECT id, code, label, revoked, max_uses, used_count, expires_at FROM invite_codes WHERE code = ?',
-    )
-    .get(cleanCode);
-  if (!invite) return res.status(404).json({ error: '邀请码不存在' });
-  if (invite.revoked) return res.status(403).json({ error: '邀请码已被撤销' });
-  if (invite.expires_at && new Date(invite.expires_at).getTime() < Date.now()) {
-    return res.status(403).json({ error: '邀请码已过期' });
-  }
-  if (invite.used_count >= invite.max_uses) {
-    return res.status(403).json({ error: '邀请码已被用完' });
+  let invite = null;
+  if (userCount !== 0) {
+    if (!code || typeof code !== 'string') {
+      return res.status(400).json({ error: '请提供邀请码' });
+    }
+    const cleanCode = code.trim().toUpperCase();
+    invite = db
+      .prepare(
+        'SELECT id, code, label, revoked, max_uses, used_count, expires_at FROM invite_codes WHERE code = ?',
+      )
+      .get(cleanCode);
+    if (!invite) return res.status(404).json({ error: '邀请码不存在' });
+    if (invite.revoked) return res.status(403).json({ error: '邀请码已被撤销' });
+    if (invite.expires_at && new Date(invite.expires_at).getTime() < Date.now()) {
+      return res.status(403).json({ error: '邀请码已过期' });
+    }
+    if (invite.used_count >= invite.max_uses) {
+      return res.status(403).json({ error: '邀请码已被用完' });
+    }
   }
 
   // 昵称唯一性（不区分大小写）
@@ -99,8 +103,6 @@ function handleRegister(req, res) {
     return res.status(409).json({ error: '昵称已被占用，请换一个' });
   }
 
-  // 第一个用户自动 admin
-  const userCount = db.prepare('SELECT COUNT(*) AS c FROM users').get().c;
   const role = userCount === 0 ? 'admin' : 'user';
 
   const userId = crypto.randomUUID();
@@ -112,9 +114,11 @@ function handleRegister(req, res) {
       db.prepare(
         'INSERT INTO users (id, display_name, password_hash, role) VALUES (?, ?, ?, ?)',
       ).run(userId, cleanName, passwordHash, role);
-      db.prepare(
-        'UPDATE invite_codes SET used_count = used_count + 1 WHERE id = ?',
-      ).run(invite.id);
+      if (invite) {
+        db.prepare(
+          'UPDATE invite_codes SET used_count = used_count + 1 WHERE id = ?',
+        ).run(invite.id);
+      }
       db.exec('COMMIT');
     } catch (err) {
       db.exec('ROLLBACK');
@@ -127,7 +131,7 @@ function handleRegister(req, res) {
     return res.status(500).json({ error: '注册失败：' + (err.message || '未知错误') });
   }
 
-  return createSessionAndRespond(userId, res, invite.id);
+  return createSessionAndRespond(userId, res, invite ? invite.id : null);
 }
 
 router.post('/register', handleRegister);
