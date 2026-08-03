@@ -59,3 +59,34 @@ test('server config loads its own .env when the process starts from the project 
     await rm(fixtureRoot, { recursive: true, force: true });
   }
 });
+
+test('server defaults allow both localhost and loopback frontend origins', async () => {
+  const fixtureRoot = await mkdtemp(join(testDir, 'config-cors-default-'));
+  const fixtureSrc = join(fixtureRoot, 'src');
+  await mkdir(fixtureSrc);
+
+  try {
+    await copyFile(join(serverRoot, 'src', 'config.js'), join(fixtureSrc, 'config.js'));
+    await writeFile(join(fixtureRoot, '.env'), 'MINIMAX_API_KEY=test-server-key\n');
+
+    const moduleUrl = pathToFileURL(join(fixtureSrc, 'config.js')).href;
+    const script = [
+      `const imported = await import(${JSON.stringify(moduleUrl)});`,
+      'console.log(JSON.stringify(imported.config.corsOrigins));',
+    ].join('\n');
+    const env = { ...process.env };
+    delete env.CORS_ORIGINS;
+
+    const { stdout } = await execFileAsync(
+      process.execPath,
+      ['--input-type=module', '--eval', script],
+      { cwd: projectRoot, env },
+    );
+    const origins = JSON.parse(stdout.trim().split(/\r?\n/).at(-1));
+
+    assert.ok(origins.includes('http://localhost:5173'));
+    assert.ok(origins.includes('http://127.0.0.1:5173'));
+  } finally {
+    await rm(fixtureRoot, { recursive: true, force: true });
+  }
+});
