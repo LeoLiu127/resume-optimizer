@@ -62,9 +62,15 @@ export function isAuthed() {
   return Boolean(getToken());
 }
 
+export function normalizeApiBase(value) {
+  return String(value || '').replace(/\/api\/?$/, '');
+}
+
+const configuredApiBase = import.meta.env?.VITE_API_BASE;
 const API_BASE =
-  import.meta.env?.VITE_API_BASE ||
-  (typeof window !== 'undefined' ? `${window.location.protocol}//${window.location.hostname}:4000` : 'http://localhost:4000');
+  configuredApiBase === undefined
+    ? (typeof window !== 'undefined' ? `${window.location.protocol}//${window.location.hostname}:4000` : 'http://localhost:4000')
+    : normalizeApiBase(configuredApiBase);
 
 async function request(path, { method = 'GET', body, auth = true, signal } = {}) {
   const headers = { 'Content-Type': 'application/json' };
