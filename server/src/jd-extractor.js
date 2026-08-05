@@ -38,6 +38,27 @@ async function getPersistentContext(options = {}) {
   return context;
 }
 
+const NAVIGATION_CONTEXT_ERROR = /Execution context was destroyed|most likely because of a navigation|Cannot find context with specified id/i;
+
+/**
+ * 页面跳转期间 evaluate 可能短暂失去执行上下文。等待新文档稳定后重试，
+ * 但不吞掉真正的页面关闭或脚本错误。
+ */
+export async function evaluateWhenStable(page, pageFunction, ...args) {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      return await page.evaluate(pageFunction, ...args);
+    } catch (error) {
+      if (!NAVIGATION_CONTEXT_ERROR.test(error?.message || '') || attempt === 2) {
+        throw error;
+      }
+      await page.waitForLoadState('domcontentloaded').catch(() => {});
+      await page.waitForTimeout(500);
+    }
+  }
+  throw new Error('页面提取失败');
+}
+
 /**
  * 从 URL 提取 JD 内容
  * @param {string} url - 招聘链接
@@ -129,7 +150,7 @@ async function extractBoss(page) {
     return extractGeneric(page);
   }
 
-  const data = await page.evaluate(() => {
+  const data = await evaluateWhenStable(page, () => {
     // 岗位名称
     const titleEl =
       document.querySelector('.name h1, .job-banner .name, [class*="job-name"], .info-primary .name h1');
@@ -184,7 +205,7 @@ async function extractLagou(page) {
     return extractGeneric(page);
   }
 
-  const data = await page.evaluate(() => {
+  const data = await evaluateWhenStable(page, () => {
     const titleEl = document.querySelector('.position-content .position-content-l h1, .job-detail h1, .position-name');
     const title = titleEl ? titleEl.textContent.trim() : '';
     const companyEl = document.querySelector('.position-content .company h2, .company-name, .job-company');
@@ -207,7 +228,7 @@ async function extractLiepin(page) {
     return extractGeneric(page);
   }
 
-  const data = await page.evaluate(() => {
+  const data = await evaluateWhenStable(page, () => {
     const titleEl = document.querySelector('.job-detail h1, .position-title, [class*="job-title"]');
     const title = titleEl ? titleEl.textContent.trim() : '';
     const companyEl = document.querySelector('.company-info a, [class*="company-name"]');
@@ -224,7 +245,7 @@ async function extractLiepin(page) {
  * 通用提取：尝试从任意页面提取 JD 内容
  */
 async function extractGeneric(page) {
-  const data = await page.evaluate(() => {
+  const data = await evaluateWhenStable(page, () => {
     // 策略1：找 <title> 作为岗位名
     const title = document.title ? document.title.split(/[-_|–—]/)[0].trim() : '';
 
